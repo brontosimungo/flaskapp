@@ -7,11 +7,13 @@ mod submission;
 mod auth;
 mod key_storage;
 mod key_manager;
+mod updater;
 
 use crate::new_job::NockPoolNewJobConsumer;
 use crate::submission::{NockPoolSubmissionProvider, NockPoolSubmissionResponseHandler};
 use crate::config::Config;
 use crate::key_manager::{resolve_mining_key, KeyManager};
+use crate::updater::AutoUpdater;
 
 use clap::Parser;
 use tokio::sync::{watch, mpsc};
@@ -19,12 +21,21 @@ use tracing::{error, info};
 use std::sync::Arc;
 use quiver::types::{Template, Submission, Target};
 use bytes::Bytes;
+use anyhow::Result;
 
 #[tokio::main]
 async fn main() {
     tracer::init();
 
     let config = Config::parse();
+
+    // Handle auto-update functionality - check on startup unless disabled
+    if !config.no_auto_update {
+        if let Err(e) = check_for_updates_and_restart().await {
+            tracing::warn!("Initial update check failed: {}", e);
+            // Continue with normal operation if update check fails
+        }
+    }
 
     if config.benchmark {
         tracing::info!("Running benchmark...");
@@ -111,6 +122,23 @@ async fn main() {
     let client_address = config.client_address.clone();
     let insecure = config.insecure.clone();
     
+    // Start background auto-update checker (runs every hour)
+    if !config.no_auto_update {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600)); // 1 hour
+            interval.tick().await; // Skip the first tick (we already checked on startup)
+            
+            loop {
+                interval.tick().await;
+                tracing::info!("Performing hourly update check...");
+                
+                if let Err(e) = check_for_updates_and_restart().await {
+                    tracing::warn!("Hourly update check failed: {}", e);
+                }
+            }
+        });
+    }
+    
     tokio::spawn(async move {
         let mut backoff_ms = 100_u64;
         let max_backoff_ms = 30_000_u64;
@@ -185,4 +213,17 @@ async fn main() {
     if let Err(e) = miner::start(config, template_rx, submission_tx).await {
         error!("Error running miner: {}", e);
     }
+}
+
+async fn check_for_updates_and_restart() -> Result<()> {
+    let updater = AutoUpdater::new()?;
+    
+    // Get current version from Cargo.toml version
+    let current_version = env!("CARGO_PKG_VERSION");
+    
+    // Check for updates and restart if available
+    // This function will exit the process if an update is found and applied
+    updater.update_and_restart(current_version).await?;
+    
+    Ok(())
 } 

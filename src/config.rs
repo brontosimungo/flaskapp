@@ -42,6 +42,10 @@ pub struct Config {
     /// Base URL for the NockPool API (for local development).
     #[arg(long, env = "NOCKPOOL_API_URL", default_value = "https://nockpool.com")]
     pub api_url: String,
+
+    /// Disable automatic updates (updates are enabled by default).
+    #[arg(long, default_value_t = false)]
+    pub no_auto_update: bool,
 }
 
 impl Config {
