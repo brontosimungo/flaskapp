@@ -150,7 +150,7 @@ pub async fn start(
                             hot_state.clone(),
                             NOCK_STACK_SIZE_TINY,
                             test_jets.clone(),
-                            false,
+                            Default::default(),
                         )
                         .await
                         .expect("Could not load mining kernel");
@@ -268,7 +268,7 @@ pub async fn benchmark() -> Result<()> {
         hot_state.clone(),
         NOCK_STACK_SIZE_TINY,
         test_jets.clone(),
-        false,
+        Default::default(),
     )
     .await
     .expect("Could not load mining kernel");
