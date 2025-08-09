@@ -6,7 +6,7 @@ use kernels::miner::KERNEL;
 use sysinfo::System;
 use tokio::sync::{Mutex, watch};
 use anyhow::Result;
-use tracing::info;
+use tracing::{info, warn, error};
 use rand::Rng;
 use bytes::Bytes;
 
@@ -66,75 +66,124 @@ pub async fn start(
     loop {
         tokio::select! {
             mining_result = mining_attempts.join_next(), if !mining_attempts.is_empty() => {
-                let mining_result = mining_result.expect("Mining attempt failed");
-                let (serf, id, slab_res) = mining_result.expect("Mining attempt result failed");
-                let slab = slab_res.expect("Mining attempt result failed");
+                match mining_result {
+                    Some(join_outcome) => match join_outcome {
+                        Ok((serf, id, slab_res)) => {
+                            let slab = match slab_res {
+                                Ok(slab) => slab,
+                                Err(e) => {
+                                    error!(%id, error = ?e, "mining attempt returned error; restarting");
+                                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                    continue;
+                                }
+                            };
 
-                let result = unsafe { slab.root() };
-                let result_cell = result.as_cell().expect("Expected result to be a cell");
+                            let result = unsafe { slab.root() };
+                            let result_cell = match result.as_cell() {
+                                Ok(c) => c,
+                                Err(_) => {
+                                    // error!(%id, error = ?e, "invalid result noun (expected cell); restarting");
+                                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                    continue;
+                                }
+                            };
 
-                let hed = result_cell.head();
+                            let hed = result_cell.head();
 
-                if hed.is_atom() && hed.eq_bytes("poke") {
-                    //  mining attempt was cancelled. restart with current block header.
-                    info!("using new template on thread={id}");
-                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
-                    continue;
-                } 
+                            if hed.is_atom() && hed.eq_bytes("poke") {
+                                //  mining attempt was cancelled. restart with current block header.
+                                info!("using new template on thread={id}");
+                                mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                continue;
+                            }
 
-                let effect = hed.as_cell().expect("Expected result to be a cell");
+                            let effect = match hed.as_cell() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!(%id, error = ?e, "invalid effect (expected cell head)");
+                                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                    continue;
+                                }
+                            };
 
-                if effect.head().eq_bytes("miss") {
-                    info!("solution did not hit targets on thread={id}, trying again");
-                    let mut nonce_slab = NounSlab::new();
-                    nonce_slab.copy_into(effect.tail());
-                    mine(serf, mining_data.lock().await, &mut mining_attempts, Some(nonce_slab), id).await;
-                    continue;
+                            if effect.head().eq_bytes("miss") {
+                                info!("solution did not hit targets on thread={id}, trying again");
+                                let mut nonce_slab = NounSlab::new();
+                                nonce_slab.copy_into(effect.tail());
+                                mine(serf, mining_data.lock().await, &mut mining_attempts, Some(nonce_slab), id).await;
+                                continue;
+                            }
+
+                            let target_type = if effect.head().eq_bytes("pool") {
+                                Target::Pool
+                            } else if effect.head().eq_bytes("network") {
+                                Target::Network
+                            } else {
+                                warn!("solution found but invalid target on thread={id}: {:?}", effect.head());
+                                mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                continue;
+                            };
+
+                            if network_only && target_type != Target::Network {
+                                info!("solution did not hit network target on thread={id}, trying again");
+                                mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                continue;
+                            }
+
+                            let success_message = match effect.tail().as_cell() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!(%id, error = ?e, "invalid success message (expected cell)");
+                                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                    continue;
+                                }
+                            };
+
+                            // 2
+                            let mut commit_slab: NounSlab = NounSlab::new();
+                            commit_slab.copy_into(success_message.head());
+                            let commit = commit_slab.jam();
+
+                            // 3
+                            let success_message_tail = match success_message.tail().as_cell() {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!(%id, error = ?e, "invalid success message tail (expected cell)");
+                                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                    continue;
+                                }
+                            };
+
+                            // 6
+                            let digest = Bytes::from(success_message_tail.head().as_atom()?.to_le_bytes());
+
+                            // 7
+                            let mut proof_slab: NounSlab = NounSlab::new();
+                            proof_slab.copy_into(success_message_tail.tail());
+                            let proof = proof_slab.jam();
+
+                            let submission = Submission::new(target_type.clone(), commit, digest, proof);
+                            info!(
+                                "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Submitting to nockpool.",
+                                target_type,
+                                ((submission.proof.len() as f64) / 1024.0 * 100.0).round() / 100.0,
+                            );
+                            if let Err(e) = submission_tx.send(submission) {
+                                error!(%id, error = ?e, "failed to send submission");
+                            }
+
+                            mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                        }
+                        Err(e) => {
+                            error!(error = ?e, "mining task failed to join");
+                            continue;
+                        }
+                    },
+                    None => {
+                        warn!("join_next returned None unexpectedly");
+                        continue;
+                    }
                 }
-
-                let target_type = if effect.head().eq_bytes("pool") {
-                    Target::Pool
-                } else if effect.head().eq_bytes("network") {
-                    Target::Network
-                } else {
-                    info!("solution found but invalid target: {:?}", effect.head());
-                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
-                    continue;
-                };
-
-                if network_only && target_type != Target::Network {
-                    info!("solution did not hit network target on thread={id}, trying again");
-                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
-                    continue;
-                }
-
-                let success_message = effect.tail().as_cell().expect("Expected result to be a cell");
-
-                // 2
-                let mut commit_slab: NounSlab = NounSlab::new();
-                commit_slab.copy_into(success_message.head());
-                let commit = commit_slab.jam();
-
-                // 3
-                let success_message_tail = success_message.tail().as_cell().expect("Expected result to be a cell");
-
-                // 6
-                let digest = Bytes::from(success_message_tail.head().as_atom()?.to_le_bytes());
-
-                // 7
-                let mut proof_slab: NounSlab = NounSlab::new();
-                proof_slab.copy_into(success_message_tail.tail());
-                let proof = proof_slab.jam();
-
-                let submission = Submission::new(target_type.clone(), commit, digest, proof);
-                info!(
-                    "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Submitting to nockpool.",
-                    target_type,
-                    ((submission.proof.len() as f64) / 1024.0 * 100.0).round() / 100.0,
-                );
-                submission_tx.send(submission).expect("Failed to send submission");
-
-                mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
             }
             _ = template_rx.changed() => {
                 let template = template_rx.borrow_and_update().clone();
@@ -144,7 +193,7 @@ pub async fn start(
                 if mining_attempts.is_empty() {
                     for i in 0..num_threads {
                         let kernel = Vec::from(KERNEL);
-                        let serf = SerfThread::<SaveableCheckpoint>::new(
+                        match SerfThread::<SaveableCheckpoint>::new(
                             kernel,
                             None,
                             hot_state.clone(),
@@ -153,11 +202,15 @@ pub async fn start(
                             Default::default(),
                         )
                         .await
-                        .expect("Could not load mining kernel");
-
-                        cancel_tokens.push(serf.cancel_token.clone());
-
-                        mine(serf, mining_data.lock().await, &mut mining_attempts, None, i).await;
+                        {
+                            Ok(serf) => {
+                                cancel_tokens.push(serf.cancel_token.clone());
+                                mine(serf, mining_data.lock().await, &mut mining_attempts, None, i).await;
+                            }
+                            Err(e) => {
+                                error!(thread_index = i, error = ?e, "Could not load mining kernel");
+                            }
+                        }
                     }
                     info!("Received nockpool template! Starting {} mining threads", num_threads);
                 } else {
@@ -199,13 +252,22 @@ async fn mine(
     } else {
         let mut rng = rand::thread_rng();
         let mut nonce_slab: NounSlab = NounSlab::new();
-        let mut nonce_cell = Atom::from_value(&mut nonce_slab, rng.gen::<u64>() % PRIME)
-            .expect("Failed to create nonce atom")
-            .as_noun();
+        let first_atom = match Atom::from_value(&mut nonce_slab, rng.gen::<u64>() % PRIME) {
+            Ok(atom) => atom.as_noun(),
+            Err(e) => {
+                error!(%id, error = ?e, "failed to create first nonce atom");
+                return;
+            }
+        };
+        let mut nonce_cell = first_atom;
         for _ in 1..5 {
-            let nonce_atom = Atom::from_value(&mut nonce_slab, rng.gen::<u64>() % PRIME)
-                .expect("Failed to create nonce atom")
-                .as_noun();
+            let nonce_atom = match Atom::from_value(&mut nonce_slab, rng.gen::<u64>() % PRIME) {
+                Ok(atom) => atom.as_noun(),
+                Err(e) => {
+                    error!(%id, error = ?e, "failed to create nonce atom");
+                    return;
+                }
+            };
             nonce_cell = T(&mut nonce_slab, &[nonce_atom, nonce_cell]);
         }
         nonce_slab.set_root(nonce_cell);
@@ -213,13 +275,37 @@ async fn mine(
     };
 
     // now we deal with the rest of the template noun
-    let template_ref = template.as_ref().expect("Mining data should already be initialized");
+    let template_ref = match template.as_ref() {
+        Some(t) => t,
+        None => {
+            warn!(%id, "mining data not initialized; skipping attempt");
+            return;
+        }
+    };
 
     let version_atom = Atom::from_bytes(&mut slab, (&template_ref.version.clone()).into());
-    let commit = slab.cue_into(template_ref.commit.clone().into()).expect("Failed to cue commit");
+    let commit = match slab.cue_into(template_ref.commit.clone().into()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(%id, error = ?e, "Failed to cue commit");
+            return;
+        }
+    };
     let nonce = slab.copy_into(unsafe { *(nonce.root()) });
-    let network_target = slab.cue_into(template_ref.network_target.clone().into()).expect("Failed to cue network target");
-    let pool_target = slab.cue_into(template_ref.pool_target.clone().into()).expect("Failed to cue pool target");
+    let network_target = match slab.cue_into(template_ref.network_target.clone().into()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(%id, error = ?e, "Failed to cue network target");
+            return;
+        }
+    };
+    let pool_target = match slab.cue_into(template_ref.pool_target.clone().into()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(%id, error = ?e, "Failed to cue pool target");
+            return;
+        }
+    };
     let pow_len_atom = Atom::from_bytes(&mut slab, (&template_ref.pow_len.clone()).into());
     let noun = T(&mut slab, &[
         D(tas!(b"template")),
@@ -246,13 +332,19 @@ pub async fn benchmark() -> Result<()> {
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
 
+    let version = hex::decode("0200000000000000").map_err(|e| anyhow::anyhow!("Failed to decode version: {e}"))?;
+    let commit = hex::decode("017ee86437eac9dbae690081199671e25cb54ce700ff8cdb259db500063b409e2aa64f968ec7ed801e75db735d82443707").map_err(|e| anyhow::anyhow!("Failed to decode commit: {e}"))?;
+    let network_target = hex::decode("81177307ec6aacb01ef04b58dbf601823db967ef80ed5256e50304ab9031bb015f1c808d1d2058623e470ce8cdf54174c07f08c49a068e8f02").map_err(|e| anyhow::anyhow!("Failed to decode network target: {e}"))?;
+    let pool_target = hex::decode("81177307ec6aacb01ef04b58dbf601823db967ef80ed5256e50304ab9031bb015f1c808d1d2058623e470ce8cdf54174c07f08c49a068e8f02").map_err(|e| anyhow::anyhow!("Failed to decode pool target: {e}"))?;
+    let pow_len = hex::decode("4000000000000000").map_err(|e| anyhow::anyhow!("Failed to decode pow len: {e}"))?;
+
     let mining_data: Mutex<Option<Template>> = Mutex::new(Some(
         Template::new(
-            Bytes::from(hex::decode("0200000000000000").expect("Failed to decode version")),
-            Bytes::from(hex::decode("017ee86437eac9dbae690081199671e25cb54ce700ff8cdb259db500063b409e2aa64f968ec7ed801e75db735d82443707").expect("Failed to decode commit")),
-            Bytes::from(hex::decode("81177307ec6aacb01ef04b58dbf601823db967ef80ed5256e50304ab9031bb015f1c808d1d2058623e470ce8cdf54174c07f08c49a068e8f02").expect("Failed to decode network target")),
-            Bytes::from(hex::decode("81177307ec6aacb01ef04b58dbf601823db967ef80ed5256e50304ab9031bb015f1c808d1d2058623e470ce8cdf54174c07f08c49a068e8f02").expect("Failed to decode pool target")),
-            Bytes::from(hex::decode("4000000000000000").expect("Failed to decode pow len")),
+            Bytes::from(version),
+            Bytes::from(commit),
+            Bytes::from(network_target),
+            Bytes::from(pool_target),
+            Bytes::from(pow_len),
         )
     ));
 
@@ -271,7 +363,7 @@ pub async fn benchmark() -> Result<()> {
         Default::default(),
     )
     .await
-    .expect("Could not load mining kernel");
+    .map_err(|e| anyhow::anyhow!("Could not load mining kernel: {e}"))?;
     let start = tokio::time::Instant::now();
     let _ = mine(serf, mining_data.lock().await, &mut mining_attempts, None, 1337).await;
 
