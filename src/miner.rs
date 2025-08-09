@@ -191,28 +191,40 @@ pub async fn start(
                 *(mining_data.lock().await) = Some(template);
 
                 if mining_attempts.is_empty() {
+                    let mut init_tasks = tokio::task::JoinSet::<(u64, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
                     for i in 0..num_threads {
                         let kernel = Vec::from(KERNEL);
-                        match SerfThread::<SaveableCheckpoint>::new(
-                            kernel,
-                            None,
-                            hot_state.clone(),
-                            NOCK_STACK_SIZE_TINY,
-                            test_jets.clone(),
-                            Default::default(),
-                        )
-                        .await
-                        {
-                            Ok(serf) => {
+                        let hot_state = hot_state.clone();
+                        let test_jets = test_jets.clone();
+                        init_tasks.spawn(async move {
+                            let res = SerfThread::<SaveableCheckpoint>::new(
+                                kernel,
+                                None,
+                                hot_state,
+                                NOCK_STACK_SIZE_TINY,
+                                test_jets,
+                                Default::default(),
+                            )
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e));
+                            (i, res)
+                        });
+                    }
+                    info!("Received nockpool template! Starting {} mining threads", num_threads);
+                    while let Some(res) = init_tasks.join_next().await {
+                        match res {
+                            Ok((i, Ok(serf))) => {
                                 cancel_tokens.push(serf.cancel_token.clone());
                                 mine(serf, mining_data.lock().await, &mut mining_attempts, None, i).await;
                             }
-                            Err(e) => {
+                            Ok((i, Err(e))) => {
                                 error!(thread_index = i, error = ?e, "Could not load mining kernel");
+                            }
+                            Err(e) => {
+                                error!(error = ?e, "kernel init task join error");
                             }
                         }
                     }
-                    info!("Received nockpool template! Starting {} mining threads", num_threads);
                 } else {
                     // Mining is already running so cancel all the running attemps
                     // which are mining on the old block.
