@@ -25,6 +25,9 @@ use zkvm_jetpack::form::PRIME;
 
 use nockvm_macros::tas;
 
+// RAM per mining thread in GB (recommended minimum)
+const RAM_PER_THREAD_GB: f64 = 2.1;
+
 pub async fn start(
     config: Config,
     mut template_rx: watch::Receiver<Template>,
@@ -33,7 +36,9 @@ pub async fn start(
     let num_threads = {
         let sys = System::new_all();
         let logical_cores = sys.cpus().len() as u32;
-        let calculated_threads = logical_cores.saturating_sub(2).max(1);
+        let total_ram_gb = sys.total_memory() / (1024 * 1024 * 1024);
+        let ram_based_threads = (total_ram_gb as f64 / RAM_PER_THREAD_GB).floor() as u32;
+        let calculated_threads = logical_cores.saturating_sub(2).min(ram_based_threads).max(1);
         if let Some(max_threads) = config.max_threads {
             max_threads.min(calculated_threads) as u64
         } else {
