@@ -67,7 +67,9 @@ impl SupabaseAuth {
                     }
                     
                     // Exponential backoff: 1, 2, 4, 8, 10 seconds (capped at 10)
-                    let delay_seconds = std::cmp::min(1u64 << retry_count, 10);
+                    // Cap retry_count to prevent overflow in bit shift operation
+                    let capped_retry_count = std::cmp::min(retry_count, 6);
+                    let delay_seconds = std::cmp::min(1u64 << capped_retry_count, 10);
                     tracing::warn!("Rate limit hit, retrying in {} seconds (attempt {}/{})", delay_seconds, retry_count + 1, MAX_RETRIES + 1);
                     
                     sleep(Duration::from_secs(delay_seconds)).await;
