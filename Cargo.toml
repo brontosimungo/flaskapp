@@ -36,14 +36,14 @@ quiver = { git = "https://github.com/swpsco/quiver.git", rev = "ca175a5e776bef66
 reqwest = { version = "0.11", default-features = false, features = ["json","rustls-tls"] }
 directories = "5.0"
 
-# nockchain - using local version for memory leak debugging
-nockchain = { path = "/home/amadeo/git/swpsco-nockchain/crates/nockchain" }
-nockvm = { path = "/home/amadeo/git/swpsco-nockchain/crates/nockvm/rust/nockvm" }
-nockapp = { path = "/home/amadeo/git/swpsco-nockchain/crates/nockapp" }
-zkvm-jetpack = { path = "/home/amadeo/git/swpsco-nockchain/crates/zkvm-jetpack" }
-nockvm_macros = { path = "/home/amadeo/git/swpsco-nockchain/crates/nockvm/rust/nockvm_macros" }
-nockchain-libp2p-io = { path = "/home/amadeo/git/swpsco-nockchain/crates/nockchain-libp2p-io" }
-kernels = { path = "/home/amadeo/git/swpsco-nockchain/crates/kernels" }
+# nockchain
+nockchain = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockchain" }
+nockvm = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockvm" }
+nockapp = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockapp" }
+zkvm-jetpack = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "zkvm-jetpack" }
+nockvm_macros = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockvm_macros" }
+nockchain-libp2p-io = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockchain-libp2p-io" }
+kernels = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "kernels" }
 jemallocator = "0.5"
 
 [profile.release-with-debug]
