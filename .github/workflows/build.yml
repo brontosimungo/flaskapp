@@ -174,6 +174,22 @@ jobs:
             --keychain $KEYCHAIN_NAME \
             target/aarch64-apple-darwin/release/nockpool-miner
 
+      - name: notarize binary
+        env:
+          AC_API_KEY_ID:     ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID:  ${{ secrets.AC_API_ISSUER_ID }}
+          AC_API_KEY_PATH:   ${{ secrets.AC_API_KEY_PATH }}
+          TEAM_ID:           484J85QW9N
+        run: |
+          echo $AC_API_KEY_PATH | base64 --decode > key.p8
+          ditto -c -k --sequesterRsrc --keepParent \
+            target/aarch64-apple-darwin/release/nockpool-miner nockpool-miner.zip
+          xcrun notarytool submit nockpool-miner.zip \
+            --key key.p8 --key-id $AC_API_KEY_ID \
+            --issuer $AC_API_ISSUER_ID --team-id $TEAM_ID --wait
+          xcrun stapler staple target/aarch64-apple-darwin/release/nockpool-miner
+          rm nockpool-miner.zip key.p8
+
       - name: build & notarize installer pkg
         env:
           AC_API_KEY_ID:     ${{ secrets.AC_API_KEY_ID }}
@@ -233,6 +249,11 @@ jobs:
         with:
           name: mac-installer
           path: dist/*.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-binary
+          path: target/aarch66-apple-darwin/release/nockpool-miner
 
   build-docker:
     needs: [vars, build-linux-x64]
@@ -341,6 +362,12 @@ jobs:
         with:
           name: mac-installer
           path: ./mac
+      - name: Download macOS binary artifact
+        if: needs.build-macos.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-binary
+          path: ./mac-bin
       - name: make release assets
         run: |
           mkdir -p out
@@ -350,6 +377,10 @@ jobs:
           fi
           if [ -f "mac/nockpool-miner.pkg" ]; then
             cp mac/nockpool-miner.pkg out/nockpool-miner-macos-aarch64.pkg
+          fi
+          if [ -f "mac-bin/nockpool-miner" ]; then
+            cp mac-bin/nockpool-miner out/nockpool-miner-macos-aarch64
+            chmod +x out/nockpool-miner-macos-aarch64
           fi
       - name: compute content hashes
         id: content-hash
@@ -421,6 +452,8 @@ jobs:
         MACOS_URL=""
         LINUX_SHA256=""
         MACOS_SHA256=""
+        MACOS_BIN_URL=""
+        MACOS_BIN_SHA256=""
 
         if [ -f "release-assets/nockpool-miner-linux-x86_64" ]; then
           LINUX_BUILT="true"
@@ -429,8 +462,13 @@ jobs:
         fi
         if [ -f "release-assets/nockpool-miner-macos-aarch64.pkg" ]; then
           MACOS_BUILT="true"
-          MACOS_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/nockpool-miner-macos-aarrch64.pkg"
+          MACOS_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/nockpool-miner-macos-aarch64.pkg"
           MACOS_SHA256=$(sha256sum release-assets/nockpool-miner-macos-aarch64.pkg | awk '{print $1}')
+        fi
+        if [ -f "release-assets/nockpool-miner-macos-aarch64" ]; then
+          MACOS_BUILT="true"
+          MACOS_BIN_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/nockpool-miner-macos-aarch64"
+          MACOS_BIN_SHA256=$(sha256sum release-assets/nockpool-miner-macos-aarch64 | awk '{print $1}')
         fi
         if [ "${{ needs.package.outputs.docker_built }}" = "true" ]; then
           DOCKER_BUILT="true"
@@ -468,6 +506,7 @@ jobs:
           echo "- **nockpool-miner-linux-x86_64**: nockpool miner for Linux x86_64 (glibc)" >> release-notes.md
         fi
         if [ $MACOS_BUILT = "true" ]; then
+          echo "- **nockpool-miner-macos-aarch64**: signed and notarized binary for macOS Apple Silicon" >> release-notes.md
           echo "- **nockpool-miner-macos-aarch64.pkg**: signed and notarized installer for macOS Apple Silicon" >> release-notes.md
           echo "" >> release-notes.md
           echo "### MacOS Installation" >> release-notes.md
@@ -497,6 +536,7 @@ jobs:
         fi
         if [ "$MACOS_BUILT" = "true" ]; then
           ASSET_ENTRIES+=("    \"macos_aarch64_pkg\": {\"url\": \"$MACOS_URL\", \"sha256\": \"$MACOS_SHA256\"}")
+          ASSET_ENTRIES+=("    \"macos_aarch64_binary\": {\"url\": \"$MACOS_BIN_URL\", \"sha256\": \"$MACOS_BIN_SHA256\"}")
         fi
         
         # Join with comma
@@ -520,7 +560,7 @@ jobs:
           release-assets/*
           ${{ github.event_name == 'workflow_dispatch' && inputs.enable_slsa == true && format('prov/{0}', needs.provenance.outputs.provenance-name) || '' }}
         draft: false
-        prerelease: ${{ github.event_name != 'push' }}
+        prerelease: ${{ github.ref_type != 'tag' }}
         generate_release_notes: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
