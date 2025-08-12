@@ -419,14 +419,18 @@ jobs:
         DOCKER_BUILT="false"
         LINUX_URL=""
         MACOS_URL=""
+        LINUX_SHA256=""
+        MACOS_SHA256=""
 
         if [ -f "release-assets/nockpool-miner-linux-x86_64" ]; then
           LINUX_BUILT="true"
           LINUX_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/nockpool-miner-linux-x86_64"
+          LINUX_SHA256=$(sha256sum release-assets/nockpool-miner-linux-x86_64 | awk '{print $1}')
         fi
         if [ -f "release-assets/nockpool-miner-macos-aarch64.pkg" ]; then
           MACOS_BUILT="true"
-          MACOS_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/nockpool-miner-macos-aarch64.pkg"
+          MACOS_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/nockpool-miner-macos-aarrch64.pkg"
+          MACOS_SHA256=$(sha256sum release-assets/nockpool-miner-macos-aarch64.pkg | awk '{print $1}')
         fi
         if [ "${{ needs.package.outputs.docker_built }}" = "true" ]; then
           DOCKER_BUILT="true"
@@ -480,23 +484,31 @@ jobs:
           echo "\`\`\`" >> release-notes.md
         fi
 
-        NOTES=$(cat release-notes.md | sed 's/$/\\n/' | tr -d '\n' | sed 's/"/\\"/g')
-        cat > release-assets/latest.json << EOF
-        {
-          "version": "$VERSION",
-          "tag_name": "$TAG_NAME",
-          "release_url": "https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME",
-          "notes": "$NOTES",
-          "assets": {
-            "linux_x86_64": "$LINUX_URL",
-            "macos_aarch64_pkg": "$MACOS_URL"
-          },
-          "docker": {
-            "hub": "swpsco/nockpool-miner:$VERSION",
-            "ecr": "990148762097.dkr.ecr.us-east-2.amazonaws.com/nockpool/miner:dev-$VERSION"
-          }
-        }
-        EOF
+        # Create latest.json
+        echo "{" > release-assets/latest.json
+        echo "  \"version\": \"$VERSION\"," >> release-assets/latest.json
+        echo "  \"tag_name\": \"$TAG_NAME\"," >> release-assets/latest.json
+        echo "  \"release_url\": \"https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME\"," >> release-assets/latest.json
+        echo "  \"assets\": {" >> release-assets/latest.json
+        
+        ASSET_ENTRIES=()
+        if [ "$LINUX_BUILT" = "true" ]; then
+          ASSET_ENTRIES+=("    \"linux_x86_64\": {\"url\": \"$LINUX_URL\", \"sha256\": \"$LINUX_SHA256\"}")
+        fi
+        if [ "$MACOS_BUILT" = "true" ]; then
+          ASSET_ENTRIES+=("    \"macos_aarch64_pkg\": {\"url\": \"$MACOS_URL\", \"sha256\": \"$MACOS_SHA256\"}")
+        fi
+        
+        # Join with comma
+        JOINED_ASSETS=$(IFS=,; echo "${ASSET_ENTRIES[*]}")
+        echo "$JOINED_ASSETS" >> release-assets/latest.json
+
+        echo "  }," >> release-assets/latest.json
+        echo "  \"docker\": {" >> release-assets/latest.json
+        echo "    \"hub\": \"swpsco/nockpool-miner:$VERSION\"," >> release-assets/latest.json
+        echo "    \"ecr\": \"990148762097.dkr.ecr.us-east-2.amazonaws.com/nockpool/miner:dev-$VERSION\"" >> release-assets/latest.json
+        echo "  }" >> release-assets/latest.json
+        echo "}" >> release-assets/latest.json
         
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
