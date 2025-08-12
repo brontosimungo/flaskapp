@@ -187,7 +187,26 @@ jobs:
           xcrun notarytool submit nockpool-miner.zip \
             --key key.p8 --key-id $AC_API_KEY_ID \
             --issuer $AC_API_ISSUER_ID --team-id $TEAM_ID --wait
-          xcrun stapler staple target/aarch64-apple-darwin/release/nockpool-miner
+          
+          staple_success=false
+          for i in {1..5}; do
+            echo "Attempting to staple binary (attempt $i)..."
+            if xcrun stapler staple target/aarch64-apple-darwin/release/nockpool-miner; then
+              echo "Binary stapling successful."
+              staple_success=true
+              break
+            fi
+            if [ $i -lt 5 ]; then
+              echo "Stapling failed, retrying in 30 seconds..."
+              sleep 30
+            fi
+          done
+
+          if [ "$staple_success" != "true" ]; then
+            echo "Binary stapling failed after multiple attempts."
+            exit 1
+          fi
+          
           rm nockpool-miner.zip key.p8
 
       - name: build & notarize installer pkg
@@ -241,7 +260,25 @@ jobs:
           xcrun notarytool submit "dist/nockpool-miner.pkg" \
                --key key.p8 --key-id $AC_API_KEY_ID \
                --issuer $AC_API_ISSUER_ID --team-id $TEAM_ID --wait
-          xcrun stapler staple "dist/nockpool-miner.pkg"
+          
+          staple_success=false
+          for i in {1..5}; do
+            echo "Attempting to staple pkg (attempt $i)..."
+            if xcrun stapler staple "dist/nockpool-miner.pkg"; then
+              echo "Pkg stapling successful."
+              staple_success=true
+              break
+            fi
+            if [ $i -lt 5 ]; then
+              echo "Stapling failed, retrying in 30 seconds..."
+              sleep 30
+            fi
+          done
+          
+          if [ "$staple_success" != "true" ]; then
+            echo "Pkg stapling failed after multiple attempts."
+            exit 1
+          fi
           
           rm -rf key.p8 pkgroot icon.icns
 
