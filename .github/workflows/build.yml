@@ -4,8 +4,6 @@ permissions:
   contents: write
 
 on:
-  push:
-    branches: [main, staging]
   workflow_dispatch:
     inputs:
       build_linux:
@@ -41,21 +39,22 @@ jobs:
   vars:
     runs-on: ubuntu-24.04
     outputs:
+      version: ${{ steps.set.outputs.version }}
       short_sha: ${{ steps.set.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
-      - name: set short git commit sha
+      - name: set version and short git commit sha
         id: set
         run: |
+          VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           calculatedSha=$(git rev-parse HEAD | cut -c1-7)
           echo "short_sha=$calculatedSha" >> $GITHUB_OUTPUT
 
   build-linux-x64:
     needs: vars
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'push') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.build_linux || inputs.build_docker))
+    if: github.event_name == 'workflow_dispatch' && (inputs.build_linux || inputs.build_docker)
     steps:
       - uses: actions/checkout@v4
       
@@ -85,9 +84,7 @@ jobs:
   build-macos:
     needs: vars
     runs-on: [self-hosted, macOS, ARM64]
-    if: |
-      (github.event_name == 'push') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_macos)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_macos
     steps:
       - uses: actions/checkout@v4
       
@@ -210,7 +207,7 @@ jobs:
           
           pkgbuild --root pkgroot \
                    --identifier io.swps.nockpool-miner.pkg \
-                   --version ${{ needs.vars.outputs.short_sha }} \
+                   --version ${{ needs.vars.outputs.version }} \
                    --install-location / \
                    nockpool-miner-unsigned.pkg
           productsign --sign "Developer ID Installer: Southwestern Pool Supply CO INC (484J85QW9N)" \
@@ -222,16 +219,18 @@ jobs:
           
           rm -rf key.p8 pkgroot icon.icns
 
+      - name: Create macos zip
+        run: zip -j dist/nockpool-miner-macos-aarch64.zip target/aarch64-apple-darwin/release/nockpool-miner
+
       - uses: actions/upload-artifact@v4
         with:
           name: mac-installer
-          path: dist/*.pkg
+          path: dist/
 
   build-docker:
     needs: [vars, build-linux-x64]
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'workflow_dispatch' && inputs.build_docker)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_docker
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
       image_name: ${{ steps.meta.outputs.tags }}
@@ -260,7 +259,7 @@ jobs:
           images: swpsco/nockpool-miner
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ needs.vars.outputs.short_sha }}
+            type=raw,value=${{ needs.vars.outputs.version }}
           
       - name: Create Dockerfile
         run: |
@@ -301,7 +300,7 @@ jobs:
           images: 990148762097.dkr.ecr.us-east-2.amazonaws.com/nockpool/miner
           tags: |
             type=raw,value=dev-latest
-            type=raw,value=dev-${{ needs.vars.outputs.short_sha }}
+            type=raw,value=dev-${{ needs.vars.outputs.version }}
       
       - name: Build and push to ECR
         uses: docker/build-push-action@v5
@@ -341,6 +340,9 @@ jobs:
           if [ -f "mac/nockpool-miner.pkg" ]; then
             cp mac/nockpool-miner.pkg out/nockpool-miner-macos-aarch64.pkg
           fi
+          if [ -f "mac/nockpool-miner-macos-aarch64.zip" ]; then
+            cp mac/nockpool-miner-macos-aarch64.zip out/nockpool-miner-macos-aarch64.zip
+          fi
       - name: compute content hashes
         id: content-hash
         run: |
@@ -375,11 +377,12 @@ jobs:
     needs: [vars, package, provenance]
     if: |
       always() && !failure() && !cancelled() &&
-      ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) ||
-       (github.event_name == 'workflow_dispatch' && inputs.create_release))
+      github.event_name == 'workflow_dispatch' && inputs.create_release
     
     steps:
     - uses: actions/checkout@v4
+      with:
+          fetch-depth: 0 # needed for git log
       
     - name: Download release artifacts
       uses: actions/download-artifact@v4
@@ -397,6 +400,8 @@ jobs:
     - name: Generate release notes
       id: release_notes
       run: |
+        VERSION=${{ needs.vars.outputs.version }}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
         SHORT_SHA=${{ needs.vars.outputs.short_sha }}
         echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
         
@@ -409,12 +414,15 @@ jobs:
         if [ -f "release-assets/nockpool-miner-macos-aarch64.pkg" ]; then
           MACOS_BUILT="true"
         fi
+        if [ -f "release-assets/nockpool-miner-macos-aarch64.zip" ]; then
+          MACOS_BUILT="true"
+        fi
         if [ "${{ needs.build-docker.result }}" = "success" ]; then
           DOCKER_BUILT="true"
         fi
         
         cat > release-notes.md << EOF
-        ## nockpool-miner Release $SHORT_SHA
+        ## nockpool-miner Release v$VERSION
         
         Built from commit \`$SHORT_SHA\`
         EOF
@@ -446,14 +454,16 @@ jobs:
         fi
         if [ $MACOS_BUILT = "true" ]; then
           echo "- **nockpool-miner-macos-aarch64.pkg**: signed and notarized installer for macOS Apple Silicon" >> release-notes.md
+          echo "- **nockpool-miner-macos-aarch64.zip**: signed binary for macOS Apple Silicon" >> release-notes.md
           echo "" >> release-notes.md
           echo "### MacOS Installation" >> release-notes.md
           echo "Download the .pkg file and double-click to install. The binary will be installed to /usr/local/bin/nockpool-miner." >> release-notes.md
+          echo "Alternatively, download the .zip file, extract it, and run the binary from your terminal." >> release-notes.md
         fi
         if [ $DOCKER_BUILT = "true" ]; then
           echo "" >> release-notes.md
           echo "### Docker Image" >> release-notes.md
-          echo "- **swpsco/nockpool-miner:latest** and **swpsco/nockpool-miner:$SHORT_SHA**" >> release-notes.md
+          echo "- **swpsco/nockpool-miner:latest** and **swpsco/nockpool-miner:$VERSION**" >> release-notes.md
           echo "" >> release-notes.md
           echo "\`\`\`bash" >> release-notes.md
           echo "docker pull swpsco/nockpool-miner:latest" >> release-notes.md
@@ -464,14 +474,14 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: nockpool-miner-${{ steps.release_notes.outputs.short_sha }}
-        name: nockpool-miner build ${{ steps.release_notes.outputs.short_sha }}
+        tag_name: ${{ github.ref_name }}
+        name: nockpool-miner v${{ steps.release_notes.outputs.version }}
         body_path: release-notes.md
         files: |
           release-assets/*
           ${{ github.event_name == 'workflow_dispatch' && inputs.enable_slsa == true && format('prov/{0}', needs.provenance.outputs.provenance-name) || '' }}
         draft: false
-        prerelease: true
+        prerelease: false
         generate_release_notes: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
