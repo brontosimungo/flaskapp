@@ -8,6 +8,7 @@ This repo includes code and binaries necessary to participate in [Nockpool](http
 
 You can download the prebuilt binaries in the release tab. The macOS bins are codesigned and the Linux bins are SLSA3 attested -- we recommend [verifying](https://github.com/slsa-framework/slsa-verifier).
 
+**Important note**: We recommend installing via the [NockPool Launcher](https://github.com/SWPSCO/nockpool-miner-launcher) application, which will automatically keep your miner up to date!
 
 ### Run
 
