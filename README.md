@@ -2,13 +2,14 @@
 
 <img width="624" height="206" alt="Nockpool logo" src="https://github.com/user-attachments/assets/cab9f6bd-0279-4d17-9c90-485954464394" />
 
+
+#### **Important note**: We recommend installing via the [NockPool Launcher](https://github.com/SWPSCO/nockpool-miner-launcher) application, which will automatically keep your miner up to date!
+
 This repo includes code and binaries necessary to participate in [Nockpool](https://nockpool.com), the premier [Nockchain](https://nockchain.org) mining pool, with your Linux or Apple Silicon machines.
 
 ### Install
 
 You can download the prebuilt binaries in the release tab. The macOS bins are codesigned and the Linux bins are SLSA3 attested -- we recommend [verifying](https://github.com/slsa-framework/slsa-verifier).
-
-#### **Important note**: We recommend installing via the [NockPool Launcher](https://github.com/SWPSCO/nockpool-miner-launcher) application, which will automatically keep your miner up to date!
 
 ### Run
 
