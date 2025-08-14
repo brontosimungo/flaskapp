@@ -111,6 +111,13 @@ async fn main() {
     let client_address = config.client_address.clone();
     let insecure = config.insecure.clone();
     
+    // 24-hour restart timer
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
+        println!("restart-miner-now");
+        std::process::exit(0);
+    });
+    
     tokio::spawn(async move {
         let mut backoff_ms = 100_u64;
         let max_backoff_ms = 30_000_u64;
