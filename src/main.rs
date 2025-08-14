@@ -115,7 +115,6 @@ async fn main() {
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
         println!("restart-miner-now");
-        std::process::exit(0);
     });
     
     tokio::spawn(async move {
