@@ -53,33 +53,60 @@ jobs:
 
   build-linux-x64:
     needs: vars
-    runs-on: ubuntu-latest
+    runs-on: ['self-hosted', 'Linux', 'X64']
     if: github.event_name == 'workflow_dispatch' && (inputs.build_linux || inputs.build_docker)
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: nightly
-          target: x86_64-unknown-linux-gnu
-
-      - name: Install glibc static dev libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libc6-dev
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       
-      - name: Build miner
-        env:
-          RUSTFLAGS: "-A warnings -C target-cpu=x86-64 -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+      - name: Build Linux binary in container
         run: |
-          cargo build --target x86_64-unknown-linux-gnu --release
+          cat > Dockerfile.build << 'EOF'
+          FROM ubuntu:22.04
+          
+          RUN apt-get update && apt-get install -y \
+              curl \
+              gcc \
+              g++ \
+              make \
+              libc6-dev \
+              git \
+              && rm -rf /var/lib/apt/lists/*
+          
+          RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
+          ENV PATH="/root/.cargo/bin:${PATH}"
+          
+          RUN rustup target add x86_64-unknown-linux-gnu
+          
+          WORKDIR /build
+          COPY . .
+          
+          ENV RUSTFLAGS="-A warnings"
+          
+          RUN cargo build --target x86_64-unknown-linux-gnu --release
+          
+          RUN ldd --version | head -n1 && \
+              objdump -T target/x86_64-unknown-linux-gnu/release/nockpool-miner | grep GLIBC | awk '{print $NF}' | sort -V | tail -n1 || true
+          EOF
+          
+          docker build -f Dockerfile.build -t miner-builder:latest .
+          
+          docker create --name extract miner-builder:latest
+          docker cp extract:/build/target/x86_64-unknown-linux-gnu/release/nockpool-miner ./nockpool-miner
+          docker rm extract
+          
+          chmod +x nockpool-miner
+          echo "Binary extracted successfully"
+          ldd nockpool-miner || echo "Binary is statically linked or ldd not available on host"
 
       - name: Upload binary as artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts-x64
-          path: target/x86_64-unknown-linux-gnu/release/nockpool-miner
+          path: nockpool-miner
+
 
   build-macos:
     needs: vars
@@ -450,7 +477,7 @@ jobs:
         EOF
         
         if [ $LINUX_BUILT = "true" ]; then
-          echo "- **nockpool-miner-linux-x86_64**: nockpool miner for Linux x86_64 (glibc)" >> release-notes.md
+          echo "- **nockpool-miner-linux-x86_64**: nockpool miner for Linux x86_64 (glibc 2.35)" >> release-notes.md
         fi
         if [ $MACOS_BUILT = "true" ]; then
           echo "- **nockpool-miner-macos-aarch64.pkg**: signed and notarized installer for macOS Apple Silicon" >> release-notes.md
