@@ -1,7 +1,13 @@
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "nockpool-miner"
 version = "0.1.0"
 edition = "2021"
+
+[features]
+default = ["tracing-tracy"]
+tracing-tracy = ["dep:tracing-tracy", "dep:tracy-client"]
 
 [dependencies]
 tokio = { version = "1.44.2", features = ["full"] }

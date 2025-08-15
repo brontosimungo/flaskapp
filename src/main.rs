@@ -1,3 +1,8 @@
+use tikv_jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 mod tracer;
 mod new_job;
 mod config;
@@ -22,13 +27,13 @@ use bytes::Bytes;
 
 #[tokio::main]
 async fn main() {
-    tracer::init();
-
     let config = Config::parse();
+    
+    tracer::init_with_config(&config);
 
     if config.benchmark {
         tracing::info!("Running benchmark...");
-        if let Err(e) = miner::benchmark().await {
+        if let Err(e) = miner::benchmark(config.nockapp_cli.trace_opts.clone()).await {
             tracing::error!("Error running benchmark: {}", e);
         }
         tracing::info!("Benchmark completed successfully");

@@ -42,6 +42,10 @@ pub struct Config {
     /// Base URL for the NockPool API (for local development).
     #[arg(long, env = "NOCKPOOL_API_URL", default_value = "https://nockpool.com")]
     pub api_url: String,
+
+    /// Embed nockapp CLI options for tracing and other features
+    #[command(flatten)]
+    pub nockapp_cli: nockapp::kernel::boot::Cli,
 }
 
 impl Config {

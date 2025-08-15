@@ -13,6 +13,7 @@ use bytes::Bytes;
 use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
 use nockapp::kernel::form::SerfThread;
+use nockapp::kernel::boot::TraceOpts;
 use nockapp::noun::slab::NounSlab;
 use nockapp::noun::AtomExt;
 use nockapp::NounExt;
@@ -201,6 +202,8 @@ pub async fn start(
                         let kernel = Vec::from(KERNEL);
                         let hot_state = hot_state.clone();
                         let test_jets = test_jets.clone();
+                        let trace_opts = config.nockapp_cli.trace_opts.clone();
+
                         init_tasks.spawn(async move {
                             let res = SerfThread::<SaveableCheckpoint>::new(
                                 kernel,
@@ -208,7 +211,7 @@ pub async fn start(
                                 hot_state,
                                 NOCK_STACK_SIZE_TINY,
                                 test_jets,
-                                Default::default(),
+                                trace_opts,
                             )
                             .await
                             .map_err(|e| anyhow::anyhow!(e));
@@ -344,7 +347,7 @@ async fn mine(
     });
 }
 
-pub async fn benchmark() -> Result<()> {
+pub async fn benchmark(trace_opts: TraceOpts) -> Result<()> {
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
@@ -371,13 +374,14 @@ pub async fn benchmark() -> Result<()> {
         Result<NounSlab>,
     )>::new();
     let kernel = Vec::from(KERNEL);
+
     let serf = SerfThread::<SaveableCheckpoint>::new(
         kernel,
         None,
         hot_state.clone(),
         NOCK_STACK_SIZE_TINY,
         test_jets.clone(),
-        Default::default(),
+        trace_opts,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Could not load mining kernel: {e}"))?;
