@@ -391,6 +391,9 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
         });
     }
 
+    // Start timing the entire benchmark
+    let benchmark_start = tokio::time::Instant::now();
+    
     // Now spawn benchmark tasks with initialized serf threads
     while let Some(res) = init_tasks.join_next().await {
         match res {
@@ -457,17 +460,21 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
         }
     }
 
+    // End timing the entire benchmark
+    let benchmark_end = tokio::time::Instant::now();
+    let total_benchmark_time = benchmark_end - benchmark_start;
+
     // Calculate and display statistics
     if !proof_times.is_empty() {
         let total_time_all_threads: tokio::time::Duration = proof_times.iter().sum();
         let average_time_per_thread = total_time_all_threads / proof_times.len() as u32;
-        let average_time_per_proof = total_time_all_threads / (proof_times.len() as u32 * benchmark_proofs);
         let min_time = proof_times.iter().min().unwrap();
         let max_time = proof_times.iter().max().unwrap();
 
         let total_proofs = proof_times.len() as u32 * benchmark_proofs;
-        let proofs_per_minute = if average_time_per_proof.as_secs_f64() > 0.0 {
-            60.0 / average_time_per_proof.as_secs_f64()
+        let average_time_per_proof = total_benchmark_time / total_proofs;
+        let proofs_per_minute = if total_benchmark_time.as_secs_f64() > 0.0 {
+            (total_proofs as f64 * 60.0) / total_benchmark_time.as_secs_f64()
         } else {
             0.0
         };
@@ -482,6 +489,7 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
         info!("  Min thread time: {:?}", min_time);
         info!("  Max thread time: {:?}", max_time);
         info!("  Total time across all threads: {:?}", total_time_all_threads);
+        info!("  Total benchmark time (wall clock): {:?}", total_benchmark_time);
     } else {
         warn!("No proofs were generated during benchmark");
     }
