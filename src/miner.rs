@@ -344,7 +344,7 @@ async fn mine(
     });
 }
 
-pub async fn benchmark(max_threads: Option<u32>) -> Result<()> {
+pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Result<()> {
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
@@ -366,7 +366,7 @@ pub async fn benchmark(max_threads: Option<u32>) -> Result<()> {
     ));
 
     let num_threads = max_threads.unwrap_or(1);
-    info!("Running benchmark with {} threads", num_threads);
+    info!("Running benchmark with {} threads, {} proofs per thread", num_threads, benchmark_proofs);
 
     let mut benchmark_tasks = tokio::task::JoinSet::<(u64, Result<tokio::time::Duration, anyhow::Error>)>::new();
 
@@ -399,25 +399,37 @@ pub async fn benchmark(max_threads: Option<u32>) -> Result<()> {
                 let template = mining_data.lock().await.clone();
                 benchmark_tasks.spawn(async move {
                     let local_mining_data = Mutex::new(template);
-                    let mut mining_attempts = tokio::task::JoinSet::<(
-                        SerfThread<SaveableCheckpoint>,
-                        u64,
-                        Result<NounSlab>,
-                    )>::new();
+                    let mut proof_times = Vec::new();
+                    let mut current_serf = serf;
                     
-                    let start = tokio::time::Instant::now();
-                    let _ = mine(serf, local_mining_data.lock().await, &mut mining_attempts, None, thread_id as u64).await;
+                    for proof_num in 0..benchmark_proofs {
+                        let mut mining_attempts = tokio::task::JoinSet::<(
+                            SerfThread<SaveableCheckpoint>,
+                            u64,
+                            Result<NounSlab>,
+                        )>::new();
+                        
+                        let start = tokio::time::Instant::now();
+                        let _ = mine(current_serf, local_mining_data.lock().await, &mut mining_attempts, None, thread_id as u64).await;
 
-                    loop {
-                        tokio::select! {
-                            _ = mining_attempts.join_next() => {
-                                break;
+                        // Get the serf back from the mining attempt
+                        loop {
+                            tokio::select! {
+                                mining_result = mining_attempts.join_next() => {
+                                    if let Some(Ok((returned_serf, _id, _result))) = mining_result {
+                                        current_serf = returned_serf;
+                                        break;
+                                    }
+                                }
                             }
                         }
+                        let elapsed = start.elapsed();
+                        info!("Thread {} generated proof {} in {:?}", thread_id, proof_num + 1, elapsed);
+                        proof_times.push(elapsed);
                     }
-                    let elapsed = start.elapsed();
-                    info!("Thread {} generated proof in {:?}", thread_id, elapsed);
-                    (thread_id as u64, Ok(elapsed))
+                    
+                    let total_time: tokio::time::Duration = proof_times.iter().sum();
+                    (thread_id as u64, Ok(total_time))
                 });
             }
             Ok((thread_id, Err(e))) => {
@@ -433,7 +445,7 @@ pub async fn benchmark(max_threads: Option<u32>) -> Result<()> {
     let mut proof_times = Vec::new();
     while let Some(result) = benchmark_tasks.join_next().await {
         match result {
-            Ok((thread_id, Ok(elapsed))) => {
+            Ok((_thread_id, Ok(elapsed))) => {
                 proof_times.push(elapsed);
             }
             Ok((thread_id, Err(e))) => {
@@ -447,17 +459,29 @@ pub async fn benchmark(max_threads: Option<u32>) -> Result<()> {
 
     // Calculate and display statistics
     if !proof_times.is_empty() {
-        let total_time: tokio::time::Duration = proof_times.iter().sum();
-        let average_time = total_time / proof_times.len() as u32;
+        let total_time_all_threads: tokio::time::Duration = proof_times.iter().sum();
+        let average_time_per_thread = total_time_all_threads / proof_times.len() as u32;
+        let average_time_per_proof = total_time_all_threads / (proof_times.len() as u32 * benchmark_proofs);
         let min_time = proof_times.iter().min().unwrap();
         let max_time = proof_times.iter().max().unwrap();
 
+        let total_proofs = proof_times.len() as u32 * benchmark_proofs;
+        let proofs_per_minute = if average_time_per_proof.as_secs_f64() > 0.0 {
+            60.0 / average_time_per_proof.as_secs_f64()
+        } else {
+            0.0
+        };
+
         info!("Benchmark Results:");
+        info!("  PROOFS PER MINUTE: {:.2}", proofs_per_minute);
+        info!("  Average time per proof: {:?}", average_time_per_proof);
         info!("  Threads: {}", num_threads);
-        info!("  Average proof time: {:?}", average_time);
-        info!("  Min proof time: {:?}", min_time);
-        info!("  Max proof time: {:?}", max_time);
-        info!("  Total time (sequential): {:?}", total_time);
+        info!("  Proofs per thread: {}", benchmark_proofs);
+        info!("  Total proofs: {}", total_proofs);
+        info!("  Average time per thread (all proofs): {:?}", average_time_per_thread);
+        info!("  Min thread time: {:?}", min_time);
+        info!("  Max thread time: {:?}", max_time);
+        info!("  Total time across all threads: {:?}", total_time_all_threads);
     } else {
         warn!("No proofs were generated during benchmark");
     }

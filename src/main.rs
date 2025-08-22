@@ -28,7 +28,7 @@ async fn main() {
 
     if config.benchmark {
         tracing::info!("Running benchmark...");
-        if let Err(e) = miner::benchmark(config.max_threads).await {
+        if let Err(e) = miner::benchmark(config.max_threads, config.benchmark_proofs).await {
             tracing::error!("Error running benchmark: {}", e);
         }
         tracing::info!("Benchmark completed successfully");

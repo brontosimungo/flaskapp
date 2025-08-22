@@ -35,6 +35,10 @@ pub struct Config {
     #[arg(long, default_value_t = false)]
     pub benchmark: bool,
 
+    /// Number of proofs to generate per thread during benchmark.
+    #[arg(long, default_value_t = 1)]
+    pub benchmark_proofs: u32,
+
     /// Clear stored mining key and exit.
     #[arg(long, default_value_t = false)]
     pub clear_key: bool,
