@@ -344,7 +344,7 @@ async fn mine(
     });
 }
 
-pub async fn benchmark() -> Result<()> {
+pub async fn benchmark(max_threads: Option<u32>) -> Result<()> {
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
@@ -365,33 +365,102 @@ pub async fn benchmark() -> Result<()> {
         )
     ));
 
-    let mut mining_attempts = tokio::task::JoinSet::<(
-        SerfThread<SaveableCheckpoint>,
-        u64,
-        Result<NounSlab>,
-    )>::new();
-    let kernel = Vec::from(KERNEL);
-    let serf = SerfThread::<SaveableCheckpoint>::new(
-        kernel,
-        None,
-        hot_state.clone(),
-        NOCK_STACK_SIZE_TINY,
-        test_jets.clone(),
-        Default::default(),
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("Could not load mining kernel: {e}"))?;
-    let start = tokio::time::Instant::now();
-    let _ = mine(serf, mining_data.lock().await, &mut mining_attempts, None, 1337).await;
+    let num_threads = max_threads.unwrap_or(1);
+    info!("Running benchmark with {} threads", num_threads);
 
-    loop {
-        tokio::select! {
-            _ = mining_attempts.join_next() => {
-                break;
+    let mut benchmark_tasks = tokio::task::JoinSet::<(u64, Result<tokio::time::Duration, anyhow::Error>)>::new();
+
+    // Initialize threads first, like the mining code does
+    let mut init_tasks = tokio::task::JoinSet::<(u32, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
+    for thread_id in 0..num_threads {
+        let kernel = Vec::from(KERNEL);
+        let hot_state = hot_state.clone();
+        let test_jets = test_jets.clone();
+        init_tasks.spawn(async move {
+            let res = SerfThread::<SaveableCheckpoint>::new(
+                kernel,
+                None,
+                hot_state,
+                NOCK_STACK_SIZE_TINY,
+                test_jets,
+                Default::default(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e));
+            (thread_id, res)
+        });
+    }
+
+    // Now spawn benchmark tasks with initialized serf threads
+    while let Some(res) = init_tasks.join_next().await {
+        match res {
+            Ok((thread_id, Ok(serf))) => {
+                // Create a local copy of the template for this thread
+                let template = mining_data.lock().await.clone();
+                benchmark_tasks.spawn(async move {
+                    let local_mining_data = Mutex::new(template);
+                    let mut mining_attempts = tokio::task::JoinSet::<(
+                        SerfThread<SaveableCheckpoint>,
+                        u64,
+                        Result<NounSlab>,
+                    )>::new();
+                    
+                    let start = tokio::time::Instant::now();
+                    let _ = mine(serf, local_mining_data.lock().await, &mut mining_attempts, None, thread_id as u64).await;
+
+                    loop {
+                        tokio::select! {
+                            _ = mining_attempts.join_next() => {
+                                break;
+                            }
+                        }
+                    }
+                    let elapsed = start.elapsed();
+                    info!("Thread {} generated proof in {:?}", thread_id, elapsed);
+                    (thread_id as u64, Ok(elapsed))
+                });
+            }
+            Ok((thread_id, Err(e))) => {
+                error!(thread_index = thread_id, error = ?e, "Could not load mining kernel for benchmark");
+            }
+            Err(e) => {
+                error!(error = ?e, "kernel init task join error in benchmark");
             }
         }
     }
-    let elapsed = start.elapsed();
-    info!("Generated proof in {:?}", elapsed);
+
+    // Collect results from all benchmark tasks
+    let mut proof_times = Vec::new();
+    while let Some(result) = benchmark_tasks.join_next().await {
+        match result {
+            Ok((thread_id, Ok(elapsed))) => {
+                proof_times.push(elapsed);
+            }
+            Ok((thread_id, Err(e))) => {
+                error!("Benchmark thread {} failed: {}", thread_id, e);
+            }
+            Err(e) => {
+                error!("Join error: {}", e);
+            }
+        }
+    }
+
+    // Calculate and display statistics
+    if !proof_times.is_empty() {
+        let total_time: tokio::time::Duration = proof_times.iter().sum();
+        let average_time = total_time / proof_times.len() as u32;
+        let min_time = proof_times.iter().min().unwrap();
+        let max_time = proof_times.iter().max().unwrap();
+
+        info!("Benchmark Results:");
+        info!("  Threads: {}", num_threads);
+        info!("  Average proof time: {:?}", average_time);
+        info!("  Min proof time: {:?}", min_time);
+        info!("  Max proof time: {:?}", max_time);
+        info!("  Total time (sequential): {:?}", total_time);
+    } else {
+        warn!("No proofs were generated during benchmark");
+    }
+    
     return Ok(());
 }
