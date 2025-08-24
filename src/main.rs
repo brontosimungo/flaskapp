@@ -22,9 +22,9 @@ use bytes::Bytes;
 
 #[tokio::main]
 async fn main() {
-    tracer::init();
-
     let config = Config::parse();
+    tracer::init(&config);
+
 
     if config.benchmark {
         tracing::info!("Running benchmark...");

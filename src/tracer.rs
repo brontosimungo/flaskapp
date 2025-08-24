@@ -3,17 +3,44 @@
 // performance. It uses the `tracing` ecosystem, which provides structured,
 // level-based logging.
 
+use crate::config::Config;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::{Resource};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry::trace::TracerProvider;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
-
 use tracing::Level;
 
-pub fn init() {
+pub fn init(config: &Config) {
     let fmt_layer = fmt::layer().with_ansi(true).event_format(MinimalFormatter);
+
+    // OTLP gRPC
+    let otel_layer = config.tempo_url.as_ref().map(|otel_url| {
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(otel_url.clone())
+            .build()
+            .expect("Failed to create OTLP span exporter");
+        
+        let resource = Resource::builder()
+            .with_attributes(vec![KeyValue::new("service.name", "nockpool-miner")])
+            .build();
+
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_resource(resource)
+            .build();
+
+        let tracer = provider.tracer("nockpool-miner");
+
+        opentelemetry::global::set_tracer_provider(provider);
+        tracing_opentelemetry::layer().with_tracer(tracer)
+    });
 
     let filter = EnvFilter::builder()
         .with_default_directive("info".parse().expect("default log directive is invalid"))
@@ -22,6 +49,7 @@ pub fn init() {
     tracing_subscriber::registry()
         .with(fmt_layer)
         .with(filter)
+        .with(otel_layer)
         .init();
 }
 

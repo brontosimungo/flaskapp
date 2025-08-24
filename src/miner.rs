@@ -6,7 +6,7 @@ use kernels::miner::KERNEL;
 use sysinfo::System;
 use tokio::sync::{Mutex, watch};
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, Instrument};
 use rand::Rng;
 use bytes::Bytes;
 
@@ -50,6 +50,7 @@ pub async fn start(
     let mut mining_attempts = tokio::task::JoinSet::<(
         SerfThread<SaveableCheckpoint>,
         u64,
+        std::time::Instant,
         Result<NounSlab, anyhow::Error>,
     )>::new();
 
@@ -73,7 +74,7 @@ pub async fn start(
             mining_result = mining_attempts.join_next(), if !mining_attempts.is_empty() => {
                 match mining_result {
                     Some(join_outcome) => match join_outcome {
-                        Ok((serf, id, slab_res)) => {
+                        Ok((serf, id, start_time, slab_res)) => {
                             let slab = match slab_res {
                                 Ok(slab) => slab,
                                 Err(e) => {
@@ -168,8 +169,10 @@ pub async fn start(
                             let proof = proof_slab.jam();
 
                             let submission = Submission::new(target_type.clone(), commit, digest, proof);
+                            let duration_ms = start_time.elapsed().as_millis();
                             info!(
-                                "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Submitting to nockpool.",
+                                duration_ms = duration_ms,
+                                "solution found on thread={id} for target={:?}. Proof size: {:?} KB.",
                                 target_type,
                                 ((submission.proof.len() as f64) / 1024.0 * 100.0).round() / 100.0,
                             );
@@ -257,6 +260,7 @@ async fn mine(
     mining_attempts: &mut tokio::task::JoinSet<(
         SerfThread<SaveableCheckpoint>,
         u64,
+        std::time::Instant,
         Result<NounSlab>,
     )>,
     nonce: Option<NounSlab>,
@@ -337,11 +341,15 @@ async fn mine(
     slab.set_root(noun);
 
     let wire = WireRepr::new("miner", 1, vec![WireTag::String("candidate".to_string())]);
-    mining_attempts.spawn(async move {
-        info!("starting mining attempt on thread={id}");
-        let result = serf.poke(wire.clone(), slab.clone()).await.map_err(|e| anyhow::anyhow!(e));
-        (serf, id, result)
-    });
+    let span = tracing::info_span!("mining_attempt", thread_id = id);
+    mining_attempts.spawn(
+        async move {
+            let start_time = std::time::Instant::now();
+            info!("starting mining attempt on thread={id}");
+            let result = serf.poke(wire.clone(), slab.clone()).await.map_err(|e| anyhow::anyhow!(e));
+            (serf, id, start_time, result)
+        }.instrument(span),
+    );
 }
 
 pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Result<()> {
@@ -409,6 +417,7 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
                         let mut mining_attempts = tokio::task::JoinSet::<(
                             SerfThread<SaveableCheckpoint>,
                             u64,
+                            std::time::Instant,
                             Result<NounSlab>,
                         )>::new();
                         
@@ -419,7 +428,7 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
                         loop {
                             tokio::select! {
                                 mining_result = mining_attempts.join_next() => {
-                                    if let Some(Ok((returned_serf, _id, _result))) = mining_result {
+                                    if let Some(Ok((returned_serf, _id, _start, _result))) = mining_result {
                                         current_serf = returned_serf;
                                         break;
                                     }
