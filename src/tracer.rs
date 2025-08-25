@@ -3,56 +3,27 @@
 // performance. It uses the `tracing` ecosystem, which provides structured,
 // level-based logging.
 
-use crate::config::Config;
-use opentelemetry::KeyValue;
-use opentelemetry_sdk::{Resource};
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry::trace::TracerProvider;
 use tracing_subscriber::fmt::format::Writer;
-use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
+use tracing_subscriber::fmt::{FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
+use crate::zipkin::SpanExportLayer;
+
 use tracing::Level;
 
-pub fn init(config: &Config) {
-    let fmt_layer = fmt::layer().with_ansi(true).event_format(MinimalFormatter);
+pub fn init(zipkin_layer: SpanExportLayer) {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
 
-    // OTLP gRPC
-    let otel_layer = config.tempo_url.as_ref().map(|otel_url| {
-        let exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(otel_url.clone())
-            .build()
-            .expect("Failed to create OTLP span exporter");
-        
-        let resource = Resource::builder()
-            .with_attributes(vec![KeyValue::new("service.name", "nockpool-miner")])
-            .build();
-
-        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_batch_exporter(exporter)
-            .with_resource(resource)
-            .build();
-
-        let tracer = provider.tracer("nockpool-miner");
-
-        opentelemetry::global::set_tracer_provider(provider);
-        tracing_opentelemetry::layer().with_tracer(tracer)
-    });
-
-    let filter = EnvFilter::builder()
-        .with_default_directive("info".parse().expect("default log directive is invalid"))
-        .from_env_lossy();
-
+    let fmt_layer = fmt::layer().event_format(MinimalFormatter);
     tracing_subscriber::registry()
-        .with(fmt_layer)
         .with(filter)
-        .with(otel_layer)
+        .with(fmt_layer)
+        .with(zipkin_layer)
         .init();
 }
-
 struct MinimalFormatter;
 
 impl<S, N> FormatEvent<S, N> for MinimalFormatter
@@ -62,7 +33,7 @@ where
 {
     fn format_event(
         &self,
-        ctx: &FmtContext<'_, S, N>,
+        ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
         mut writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> std::fmt::Result {

@@ -47,9 +47,9 @@ pub struct Config {
     #[arg(long, env = "NOCKPOOL_API_URL", default_value = "https://nockpool.com")]
     pub api_url: String,
 
-    /// Optional Tempo (OTLP) endpoint for tracing
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", default_value = "https://telemetry.nockpool.com")]
-    pub tempo_url: Option<String>,
+    /// Tracing collection endpoint
+    #[arg(long, env = "ZIPKIN_ENDPOINT", default_value = "https://telemetry.nockpool.com:443")]
+    pub collector_url: Option<String>,
 }
 
 impl Config {

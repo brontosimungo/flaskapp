@@ -341,16 +341,21 @@ async fn mine(
     slab.set_root(noun);
 
     let wire = WireRepr::new("miner", 1, vec![WireTag::String("candidate".to_string())]);
-    let span = tracing::info_span!("mining_attempt", thread_id = id);
+    let span = tracing::info_span!("proof", thread_id = id, mode = "live");
     mining_attempts.spawn(
         async move {
             let start_time = std::time::Instant::now();
             info!("starting mining attempt on thread={id}");
-            let result = serf.poke(wire.clone(), slab.clone()).await.map_err(|e| anyhow::anyhow!(e));
+            let result = serf
+                .poke(wire, slab)
+                .await
+                .map_err(|e| anyhow::anyhow!(e));
             (serf, id, start_time, result)
-        }.instrument(span),
+        }
+        .instrument(span),
     );
 }
+
 
 pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Result<()> {
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
