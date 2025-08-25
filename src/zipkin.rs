@@ -54,7 +54,7 @@ where
         let mut exts = span.extensions_mut();
 
         let meta = span.metadata();
-        let is_proof = meta.name() == "proof" || meta.name() == "benchmark";
+        let is_proof = meta.name() == "poke";
         exts.insert(ShouldExport(is_proof));
 
         if !is_proof {
@@ -137,7 +137,7 @@ where
         let span = ctx.span(&id).expect("span missing");
         let exts = span.extensions();
 
-        if !exts.get::<ShouldExport>().map(|s| s.0).unwrap_or(false) {
+        if !exts.get::<ShouldExport>().map(|s| s.0).unwrap_or(true) {
             return; // ignore non-proof spans
         }
 
@@ -167,7 +167,6 @@ where
     }
 }
 
-
 // ------------ exporter ------------
 
 async fn span_batch_exporter(mut rx: mpsc::UnboundedReceiver<SpanData>, endpoint: String) {
@@ -177,7 +176,7 @@ async fn span_batch_exporter(mut rx: mpsc::UnboundedReceiver<SpanData>, endpoint
         .expect("zipkin client");
 
     let batch_size = 32usize;
-    let flush_every = std::time::Duration::from_secs(3);
+    let flush_every = std::time::Duration::from_secs(60);
     let mut buf: Vec<SpanData> = Vec::with_capacity(batch_size);
     let mut tick = tokio::time::interval(flush_every);
 
@@ -209,7 +208,7 @@ async fn flush(client: &reqwest::Client, endpoint: &str, buf: &mut Vec<SpanData>
     let batch: Vec<SpanData> = std::mem::take(buf);
     let payload = convert_to_zipkin(&batch);
 
-    // small bodies are fine; skip logging JSON unless env says so
+    // control logging body
     let dump_body = std::env::var_os("NP_ZIPKIN_DEBUG_BODY").is_some();
 
     let res = client

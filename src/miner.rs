@@ -6,7 +6,7 @@ use kernels::miner::KERNEL;
 use sysinfo::System;
 use tokio::sync::{Mutex, watch};
 use anyhow::Result;
-use tracing::{info, warn, error, Instrument};
+use tracing::{error, info, warn};
 use rand::Rng;
 use bytes::Bytes;
 
@@ -52,6 +52,7 @@ pub async fn start(
         u64,
         std::time::Instant,
         Result<NounSlab, anyhow::Error>,
+        tracing::Span,
     )>::new();
 
     let network_only = config.network_only;
@@ -74,10 +75,15 @@ pub async fn start(
             mining_result = mining_attempts.join_next(), if !mining_attempts.is_empty() => {
                 match mining_result {
                     Some(join_outcome) => match join_outcome {
-                        Ok((serf, id, start_time, slab_res)) => {
+                        Ok((serf, id, start_time, slab_res, span)) => {
+                            // Re-enter span so we can attach final tags
+                            let _enter = span.enter();
+                            
                             let slab = match slab_res {
                                 Ok(slab) => slab,
                                 Err(e) => {
+                                    // mark error on the span
+                                    tracing::Span::current().record("status", &tracing::field::display("error"));
                                     error!(%id, error = ?e, "mining attempt returned error; restarting");
                                     mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                     continue;
@@ -88,7 +94,7 @@ pub async fn start(
                             let result_cell = match result.as_cell() {
                                 Ok(c) => c,
                                 Err(_) => {
-                                    // error!(%id, error = ?e, "invalid result noun (expected cell); restarting");
+                                    tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_ERROR"));
                                     mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                     continue;
                                 }
@@ -97,7 +103,9 @@ pub async fn start(
                             let hed = result_cell.head();
 
                             if hed.is_atom() && hed.eq_bytes("poke") {
-                                //  mining attempt was cancelled. restart with current block header.
+                                // mining attempt was cancelled. restart with current block header.
+                                tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_OK"));
+                                tracing::Span::current().record("mining.result", &tracing::field::display("cancelled"));
                                 info!("using new template on thread={id}");
                                 mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                 continue;
@@ -106,6 +114,7 @@ pub async fn start(
                             let effect = match hed.as_cell() {
                                 Ok(c) => c,
                                 Err(e) => {
+                                    tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_ERROR"));
                                     error!(%id, error = ?e, "invalid effect (expected cell head)");
                                     mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                     continue;
@@ -113,6 +122,8 @@ pub async fn start(
                             };
 
                             if effect.head().eq_bytes("miss") {
+                                tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_OK"));
+                                tracing::Span::current().record("mining.result", &tracing::field::display("miss"));
                                 info!("solution did not hit targets on thread={id}, trying again");
                                 let mut nonce_slab = NounSlab::new();
                                 nonce_slab.copy_into(effect.tail());
@@ -125,20 +136,25 @@ pub async fn start(
                             } else if effect.head().eq_bytes("network") {
                                 Target::Network
                             } else {
+                                tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_ERROR"));
                                 warn!("solution found but invalid target on thread={id}: {:?}", effect.head());
                                 mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                 continue;
                             };
 
                             if network_only && target_type != Target::Network {
+                                tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_OK"));
+                                tracing::Span::current().record("mining.result", &tracing::field::display("miss"));
                                 info!("solution did not hit network target on thread={id}, trying again");
                                 mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                 continue;
                             }
 
+                            // At this point it's a valid, accepted proof
                             let success_message = match effect.tail().as_cell() {
                                 Ok(c) => c,
                                 Err(e) => {
+                                    tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_ERROR"));
                                     error!(%id, error = ?e, "invalid success message (expected cell)");
                                     mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                     continue;
@@ -154,6 +170,7 @@ pub async fn start(
                             let success_message_tail = match success_message.tail().as_cell() {
                                 Ok(c) => c,
                                 Err(e) => {
+                                    tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_ERROR"));
                                     error!(%id, error = ?e, "invalid success message tail (expected cell)");
                                     mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
                                     continue;
@@ -161,21 +178,37 @@ pub async fn start(
                             };
 
                             // 6
-                            let digest = Bytes::from(success_message_tail.head().as_atom()?.to_le_bytes());
+                            let digest = match success_message_tail.head().as_atom() {
+                                Ok(atom) => Bytes::from(atom.to_le_bytes()),
+                                Err(e) => {
+                                    tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_ERROR"));
+                                    error!(%id, error = ?e, "invalid digest (expected atom)");
+                                    mine(serf, mining_data.lock().await, &mut mining_attempts, None, id).await;
+                                    continue;
+                                }
+                            };
 
                             // 7
                             let mut proof_slab: NounSlab = NounSlab::new();
                             proof_slab.copy_into(success_message_tail.tail());
                             let proof = proof_slab.jam();
 
+                            // Mark successful proof with proper target
+                            tracing::Span::current().record("status.code", &tracing::field::display("STATUS_CODE_OK"));
+                            tracing::Span::current().record("mining.result", &tracing::field::display(format!("{target_type:?}")));
+                            
+                            // Calculate elapsed time
+                            let elapsed = start_time.elapsed();
+                            tracing::Span::current().record("duration_ms", &tracing::field::display(elapsed.as_millis()));
+
                             let submission = Submission::new(target_type.clone(), commit, digest, proof);
-                            let duration_ms = start_time.elapsed().as_millis();
                             info!(
-                                duration_ms = duration_ms,
-                                "solution found on thread={id} for target={:?}. Proof size: {:?} KB.",
+                                "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Duration: {:?}. Submitting to nockpool.",
                                 target_type,
                                 ((submission.proof.len() as f64) / 1024.0 * 100.0).round() / 100.0,
+                                elapsed,
                             );
+                            
                             if let Err(e) = submission_tx.send(submission) {
                                 error!(%id, error = ?e, "failed to send submission");
                             }
@@ -245,6 +278,7 @@ pub async fn start(
         }
     }
 }
+
 /*
         %template
         version=?(%0 %1 %2)
@@ -262,6 +296,7 @@ async fn mine(
         u64,
         std::time::Instant,
         Result<NounSlab>,
+        tracing::Span,
     )>,
     nonce: Option<NounSlab>,
     id: u64,
@@ -341,21 +376,23 @@ async fn mine(
     slab.set_root(noun);
 
     let wire = WireRepr::new("miner", 1, vec![WireTag::String("candidate".to_string())]);
+    
+    // Create the proof span exactly like the working version
     let span = tracing::info_span!("proof", thread_id = id, mode = "live");
-    mining_attempts.spawn(
+    tracing::debug!(target: "zipkin", "Created proof span for thread {}", id);
+    
+    mining_attempts.spawn({
+        let span = span.clone();
         async move {
+            let _enter = span.enter(); // Enter the span to make it current
+            tracing::debug!(target: "zipkin", "Entered proof span for thread {}", id);
             let start_time = std::time::Instant::now();
             info!("starting mining attempt on thread={id}");
-            let result = serf
-                .poke(wire, slab)
-                .await
-                .map_err(|e| anyhow::anyhow!(e));
-            (serf, id, start_time, result)
+            let result = serf.poke(wire, slab).await.map_err(|e| anyhow::anyhow!(e));
+            (serf, id, start_time, result, span.clone())
         }
-        .instrument(span),
-    );
+    });
 }
-
 
 pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Result<()> {
     let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
@@ -424,6 +461,7 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
                             u64,
                             std::time::Instant,
                             Result<NounSlab>,
+                            tracing::Span,
                         )>::new();
                         
                         let start = tokio::time::Instant::now();
@@ -433,7 +471,7 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
                         loop {
                             tokio::select! {
                                 mining_result = mining_attempts.join_next() => {
-                                    if let Some(Ok((returned_serf, _id, _start, _result))) = mining_result {
+                                    if let Some(Ok((returned_serf, _id, _start, _result, _span))) = mining_result {
                                         current_serf = returned_serf;
                                         break;
                                     }
