@@ -33,7 +33,7 @@ async fn main() {
 
     if config.benchmark {
         tracing::info!("Running benchmark...");
-        if let Err(e) = miner::benchmark(config.nockapp_cli.trace_opts.clone()).await {
+        if let Err(e) = miner::benchmark(config.max_threads, config.benchmark_proofs, config.nockapp_cli.trace_opts.clone()).await {
             tracing::error!("Error running benchmark: {}", e);
         }
         tracing::info!("Benchmark completed successfully");
