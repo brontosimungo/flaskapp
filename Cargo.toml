@@ -54,3 +54,9 @@ nockvm_macros = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd
 nockchain-libp2p-io = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad" }
 kernels = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad" }
 
+[profile.release]
+debug = true
+rustflags = [
+    "-C", "force-frame-pointers=yes"
+]
+
