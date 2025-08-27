@@ -49,7 +49,7 @@ jobs:
           VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           calculatedSha=$(git rev-parse HEAD | cut -c1-7)
-          echo "SHORT_SHA=$calculatedSha" >> $GITHUB_OUTPUT
+          echo "short_sha=$calculatedSha" >> $GITHUB_OUTPUT
 
   build-linux-x64:
     needs: vars
@@ -372,26 +372,24 @@ jobs:
         
     - name: Upload Linux to R2
       if: needs.build-linux-x64.result == 'success'
-      env:
-        SHORT_SHA: ${{ env.SHORT_SHA }}
       run: |
-        echo "Uploading Linux build to r2:swpsco/nockpool-miner/linux/"
-        rclone copy linux_x64/nockpool-miner r2:swpsco/nockpool-miner/linux/download --progress
-        echo "Linux binary uploaded to: https://bin.aeroe.io/nockpool-miner/${SHORT_SHA}/download"
+        SHORT_SHA="${{ needs.vars.outputs.short_sha }}"
+        echo "Uploading Linux build to r2:swpsco/nockpool-miner/${SHORT_SHA}/linux/"
+        rclone copy linux_x64/nockpool-miner r2:swpsco/nockpool-miner/${SHORT_SHA}/linux/download --progress
+        echo "Linux binary uploaded to: https://bin.aeroe.io/nockpool-miner/${SHORT_SHA}/linux/download"
         
     - name: Upload macOS to R2
       if: needs.build-macos.result == 'success'
-      env:
-        SHORT_SHA: ${{ env.SHORT_SHA }}
       run: |
-        echo "Uploading macOS builds to r2:swpsco/nockpool-miner/mac/"
+        SHORT_SHA="${{ needs.vars.outputs.short_sha }}"
+        echo "Uploading macOS builds to r2:swpsco/nockpool-miner/${SHORT_SHA}/mac/"
         if [ -f "mac/nockpool-miner.pkg" ]; then
-          rclone copy mac/nockpool-miner.pkg r2:swpsco/nockpool-miner/mac/ --progress
-          echo "macOS pkg uploaded to: https://bin.aeroe.io/nockpool-miner/${SHORT_SHA}/nockpool-miner.pkg"
+          rclone copy mac/nockpool-miner.pkg r2:swpsco/nockpool-miner/${SHORT_SHA}/mac/ --progress
+          echo "macOS pkg uploaded to: https://bin.aeroe.io/nockpool-miner/${SHORT_SHA}/mac/nockpool-miner.pkg"
         fi
         if [ -f "mac/nockpool-miner-macos-aarch64.zip" ]; then
-          rclone copy mac/nockpool-miner-macos-aarch64.zip r2:swpsco/nockpool-miner/mac/ --progress
-          echo "macOS zip uploaded to: https://bin.aeroe.io/nockpool-miner/${SHORT_SHA}/nockpool-miner-macos-aarch64.zip"
+          rclone copy mac/nockpool-miner-macos-aarch64.zip r2:swpsco/nockpool-miner/${SHORT_SHA}/mac/ --progress
+          echo "macOS zip uploaded to: https://bin.aeroe.io/nockpool-miner/${SHORT_SHA}/mac/nockpool-miner-macos-aarch64.zip"
         fi
 
   package:
