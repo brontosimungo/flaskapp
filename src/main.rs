@@ -7,6 +7,7 @@ mod submission;
 mod auth;
 mod key_storage;
 mod key_manager;
+mod telemetry;
 
 use crate::new_job::NockPoolNewJobConsumer;
 use crate::submission::{NockPoolSubmissionProvider, NockPoolSubmissionResponseHandler};
@@ -110,6 +111,18 @@ async fn main() {
     let server_address = config.server_address.clone();
     let client_address = config.client_address.clone();
     let insecure = config.insecure.clone();
+    
+    // --- Start telemetry client ---
+    let telemetry_client = telemetry::TelemetryClient::new(
+        key.clone(), 
+        config.api_url.clone()
+    );
+    
+    tokio::spawn(async move {
+        if let Err(e) = telemetry_client.start_telemetry_loop().await {
+            tracing::error!("Telemetry client failed: {}", e);
+        }
+    });
     
     // 24-hour restart timer
     tokio::spawn(async move {
