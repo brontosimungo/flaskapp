@@ -33,8 +33,13 @@ bytes = { version = "1.10.1" }
 hyper = { version = "0.14", features = ["full"] }
 rustls = "0.23"
 quiver = { git = "https://github.com/swpsco/quiver.git", rev = "ca175a5e776bef661d8972e5ad88927b78622e24" }
-reqwest = { version = "0.11", default-features = false, features = ["json","rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 directories = "5.0"
+
+libloading = "0.8.8"
 
 # nockchain
 nockchain = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockchain" }
