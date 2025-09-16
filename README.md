@@ -98,7 +98,7 @@ Release notes include the exact upstream commit hashes used for the build.
 ## Environment variables (script)
 
 - `ACCESS_TOKEN` — default pool account token (can be overridden by CLI `--account-token`)
-- `MAX_THREADS` — default thread count (overridden by `--threads`)
+- `MAX_THREADS` — default thread count (overridden by `--max-threads`)
 - `MINER_JAM_PATH` — path to `miner.jam` (overridden by `--jam`)
 - `LIB_DIR` — directory containing `libzkvm_jetpack.so` (overridden by `--lib-dir`)
 - `MINER_BIN` — path to the miner binary (default: `./nockpool-miner`)
