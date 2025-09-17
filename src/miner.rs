@@ -70,13 +70,13 @@ impl ProofRateTracker {
     pub fn get_proof_rate(&mut self) -> f64 {
         let now = Instant::now();
         self.clean_old_proofs(now);
-        
+
         if self.proof_timestamps.is_empty() {
             return 0.0;
         }
 
         let proof_count = self.proof_timestamps.len() as f64;
-        
+
         // If we have fewer than the full window of data, scale accordingly
         if let Some(&oldest_time) = self.proof_timestamps.front() {
             let actual_window_seconds = now.duration_since(oldest_time).as_secs_f64();
@@ -231,6 +231,13 @@ pub async fn start(
 
                             if effect.head().eq_bytes("miss") {
                                 info!("solution did not hit targets on thread={id}, trying again");
+
+                                // Add miss to proof rate tracker so device_proof_rate includes all attempts
+                                {
+                                    let mut tracker = proof_rate_tracker.lock().await;
+                                    tracker.add_proof();
+                                }
+
                                 let mut nonce_slab = NounSlab::new();
                                 nonce_slab.copy_into(effect.tail());
                                 mine(serf, mining_data.lock().await, &mut mining_attempts, Some(nonce_slab), id).await;
