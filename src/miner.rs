@@ -1,5 +1,8 @@
 use crate::config::Config;
+use crate::hot_loader::HotLibrary;
+use crate::jam_loader::load_kernel_from_env;
 
+use nockvm::jets::hot::HotEntry;
 use quiver::types::{Template, Submission, Target};
 use kernels::miner::KERNEL;
 
@@ -134,7 +137,29 @@ pub async fn start(
         info!("mining for pool and network targets");
     }
 
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+    let hot_state = {
+        #[cfg(target_os = "linux")]
+        {
+            // Try to load external library first on Linux
+            match unsafe { HotLibrary::load_auto() } {
+                Ok(lib) => {
+                    info!("Successfully loaded external libzkvm_jetpack.so");
+                    let hot_state: &[HotEntry] = lib.jets();
+                    hot_state.to_vec()
+                }
+                Err(e) => {
+                    info!("External library not found: {}, using built-in", e);
+                    zkvm_jetpack::hot::produce_prover_hot_state()
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // On non-Linux platforms (including macOS), always use built-in
+            info!("Using built-in hot state (external libraries disabled on this platform)");
+            zkvm_jetpack::hot::produce_prover_hot_state()
+        }
+    };
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
 
@@ -298,9 +323,19 @@ pub async fn start(
                 *(mining_data.lock().await) = Some(template);
 
                 if mining_attempts.is_empty() {
+                    let kernel_bytes = match load_kernel_from_env() {
+                        Ok(k) => {
+                            info!("Using external miner.jam kernel");
+                            k
+                        }
+                        Err(_) => {
+                            info!("External miner.jam not found, using embedded kernel");
+                            Vec::from(KERNEL)
+                        }
+                    };
                     let mut init_tasks = tokio::task::JoinSet::<(u64, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
                     for i in 0..num_threads {
-                        let kernel = Vec::from(KERNEL);
+                        let kernel = kernel_bytes.clone();
                         let hot_state = hot_state.clone();
                         let test_jets = test_jets.clone();
                         init_tasks.spawn(async move {
@@ -447,7 +482,30 @@ async fn mine(
 }
 
 pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Result<()> {
-    let hot_state = zkvm_jetpack::hot::produce_prover_hot_state();
+    let hot_state = {
+        #[cfg(target_os = "linux")]
+        {
+            // Try to load external library first on Linux
+            match unsafe { HotLibrary::load_auto() } {
+                Ok(lib) => {
+                    info!("Successfully loaded external libzkvm_jetpack.so");
+                    let hot_state: &[HotEntry] = lib.jets();
+                    hot_state.to_vec()
+                }
+                Err(e) => {
+                    info!("External library not found: {}, using built-in", e);
+                    zkvm_jetpack::hot::produce_prover_hot_state()
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // On non-Linux platforms (including macOS), always use built-in
+            info!("Using built-in hot state (external libraries disabled on this platform)");
+            zkvm_jetpack::hot::produce_prover_hot_state()
+        }
+    };
+
     let test_jets_str = std::env::var("NOCK_TEST_JETS").unwrap_or_default();
     let test_jets = nockapp::kernel::boot::parse_test_jets(test_jets_str.as_str());
 
@@ -471,11 +529,20 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
     info!("Running benchmark with {} threads, {} proofs per thread", num_threads, benchmark_proofs);
 
     let mut benchmark_tasks = tokio::task::JoinSet::<(u64, Result<tokio::time::Duration, anyhow::Error>)>::new();
-
+    let kernel_bytes = match load_kernel_from_env() {
+        Ok(k) => {
+            info!("Using external miner.jam kernel");
+            k
+        }
+        Err(_) => {
+            info!("External miner.jam not found, using embedded kernel");
+            Vec::from(KERNEL)
+        }
+    };
     // Initialize threads first, like the mining code does
     let mut init_tasks = tokio::task::JoinSet::<(u32, Result<SerfThread<SaveableCheckpoint>, anyhow::Error>)>::new();
     for thread_id in 0..num_threads {
-        let kernel = Vec::from(KERNEL);
+        let kernel = kernel_bytes.clone();
         let hot_state = hot_state.clone();
         let test_jets = test_jets.clone();
         init_tasks.spawn(async move {

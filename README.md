@@ -95,5 +95,7 @@ target/release/nockpool-miner --key nockpool_yourdevicekeyhere123
 | `--insecure` | `INSECURE` | `false` | Use insecure connection to the nockpool server. |
 | `--benchmark` | `BENCHMARK` | `false` | Run benchmarking tool. Ignores all other arguments. |
 | `--clear-key` | - | `false` | Clear stored mining key and exit. |
+| `--jam` | `MINER_JAM_PATH` | `./miner.jam` | Path to jamfile for miner |
+| `--lib-dir` | - | `./libzkvm_jetpack.so` | Path to dynamic libraries |
 
 **Note:** Either `--account-token` or `--key` must be provided (but not both).

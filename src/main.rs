@@ -8,6 +8,8 @@ mod auth;
 mod key_storage;
 mod key_manager;
 mod telemetry;
+mod hot_loader;
+mod jam_loader;
 
 use crate::new_job::NockPoolNewJobConsumer;
 use crate::submission::{NockPoolSubmissionProvider, NockPoolSubmissionResponseHandler};
