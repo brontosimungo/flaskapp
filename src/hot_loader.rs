@@ -2,7 +2,7 @@
 use anyhow::{bail, Result};
 use libloading::{Library, Symbol};
 use nockvm::jets::hot::HotEntry;
-use std::{path::Path, slice}; // même type que dans la lib
+use std::{path::{Path, PathBuf}, slice, env}; // même type que dans la lib
 
 type LenFn = unsafe extern "C" fn() -> usize;
 type PtrFn = unsafe extern "C" fn() -> *const HotEntry;
@@ -15,6 +15,36 @@ pub struct HotLibrary {
 }
 
 impl HotLibrary {
+    /// Find the library in the binary directory
+    pub fn find_library() -> Option<PathBuf> {
+        // Try to get the current executable path
+        if let Ok(exe_path) = env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let lib_path = exe_dir.join("libzkvm_jetpack.so");
+                if lib_path.exists() {
+                    return Some(lib_path);
+                }
+            }
+        }
+
+        // Fallback to current directory
+        let current_dir_path = PathBuf::from("libzkvm_jetpack.so");
+        if current_dir_path.exists() {
+            Some(current_dir_path)
+        } else {
+            None
+        }
+    }
+
+    /// Try to load library automatically (binary dir, then current dir)
+    pub unsafe fn load_auto() -> Result<Self> {
+        if let Some(path) = Self::find_library() {
+            Self::load(path)
+        } else {
+            bail!("libzkvm_jetpack.so not found in binary directory or current directory")
+        }
+    }
+
     /// Charge la lib dynamique et récupère le slice des jets
     pub unsafe fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let lib = Library::new(path.as_ref())?;
