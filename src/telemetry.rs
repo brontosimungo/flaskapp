@@ -32,7 +32,7 @@ impl TelemetryClient {
 
     pub async fn send_telemetry(&self) -> Result<()> {
         let (device_info, proof_rate) = get_device_info_with_proof_rate();
-        
+
         let telemetry = TelemetryData {
             device_os: device_info.os,
             device_cpu: device_info.cpu_model,
