@@ -7,23 +7,6 @@
 
 This repo includes code and binaries necessary to participate in [Nockpool](https://nockpool.com), the premier [Nockchain](https://nockchain.org) mining pool, with your Linux or Apple Silicon machines.
 
-### Downloads
-
-👉 Get the latest prebuilt bundle from **GitHub Releases → Latest** [Go to bwming github](https://github.com/bwmining/nockpool-addons/releases).
-
-- Example asset name: `nockpool-addons_v0.1.0_linux-x86_64_zen5.tar.gz`
-- Inside the tarball:
-  - `miner.jam`
-  - `libzkvm_jetpack.so`
-  - `README.md`
-  - `LICENSE`
-
-Verify integrity:
-
-```bash
-sha256sum -c SHA256SUMS
-```
-
 ---
 
 ### Install
