@@ -9,6 +9,8 @@ use anyhow::Result;
 use tracing::{info, warn, error};
 use rand::Rng;
 use bytes::Bytes;
+use std::collections::VecDeque;
+use std::time::{Instant, Duration};
 
 use nockapp::save::SaveableCheckpoint;
 use nockapp::utils::NOCK_STACK_SIZE_TINY;
@@ -27,6 +29,77 @@ use nockvm_macros::tas;
 
 // RAM per mining thread in GB (recommended minimum)
 const RAM_PER_THREAD_GB: f64 = 2.1;
+
+// Window duration for proof rate calculation (10 minutes)
+const PROOF_RATE_WINDOW_SECONDS: u64 = 600;
+
+#[derive(Debug, Clone)]
+pub struct ProofRateTracker {
+    proof_timestamps: VecDeque<Instant>,
+    window_duration: Duration,
+}
+
+impl ProofRateTracker {
+    pub fn new() -> Self {
+        Self {
+            proof_timestamps: VecDeque::new(),
+            window_duration: Duration::from_secs(PROOF_RATE_WINDOW_SECONDS),
+        }
+    }
+
+    pub fn add_proof(&mut self) {
+        let now = Instant::now();
+        self.proof_timestamps.push_back(now);
+        self.clean_old_proofs(now);
+    }
+
+    fn clean_old_proofs(&mut self, now: Instant) {
+        let cutoff = now - self.window_duration;
+        while let Some(&front_time) = self.proof_timestamps.front() {
+            if front_time < cutoff {
+                self.proof_timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn get_proof_rate(&mut self) -> f64 {
+        let now = Instant::now();
+        self.clean_old_proofs(now);
+        
+        if self.proof_timestamps.is_empty() {
+            return 0.0;
+        }
+
+        let proof_count = self.proof_timestamps.len() as f64;
+        
+        // If we have fewer than the full window of data, scale accordingly
+        if let Some(&oldest_time) = self.proof_timestamps.front() {
+            let actual_window_seconds = now.duration_since(oldest_time).as_secs_f64();
+            if actual_window_seconds > 0.0 {
+                proof_count / actual_window_seconds
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        }
+    }
+}
+
+// Global proof rate tracker for access across the application
+use std::sync::Arc;
+static GLOBAL_PROOF_RATE_TRACKER: std::sync::OnceLock<Arc<Mutex<ProofRateTracker>>> = std::sync::OnceLock::new();
+
+pub fn get_current_proof_rate() -> f64 {
+    if let Some(tracker) = GLOBAL_PROOF_RATE_TRACKER.get() {
+        if let Ok(mut guard) = tracker.try_lock() {
+            return guard.get_proof_rate();
+        }
+    }
+    0.0
+}
 
 pub async fn start(
     config: Config,
@@ -67,6 +140,26 @@ pub async fn start(
 
     let mining_data: Mutex<Option<Template>> = Mutex::new(None);
     let mut cancel_tokens: Vec<NockCancelToken> = Vec::<NockCancelToken>::new();
+    let proof_rate_tracker = Arc::new(Mutex::new(ProofRateTracker::new()));
+    
+    // Initialize global tracker
+    let _ = GLOBAL_PROOF_RATE_TRACKER.set(proof_rate_tracker.clone());
+
+    // Spawn a task to periodically log proof rate
+    {
+        let proof_rate_tracker_clone = proof_rate_tracker.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let mut tracker = proof_rate_tracker_clone.lock().await;
+                let current_rate = tracker.get_proof_rate();
+                if current_rate > 0.0 {
+                    info!("Current mining rate: {:.4} proofs/sec", current_rate);
+                }
+            }
+        });
+    }
 
     loop {
         tokio::select! {
@@ -168,11 +261,20 @@ pub async fn start(
                             let proof = proof_slab.jam();
 
                             let submission = Submission::new(target_type.clone(), commit, digest, proof);
-                            info!(
-                                "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Submitting to nockpool.",
-                                target_type,
-                                ((submission.proof.len() as f64) / 1024.0 * 100.0).round() / 100.0,
-                            );
+                            
+                            // Update proof rate tracker
+                            {
+                                let mut tracker = proof_rate_tracker.lock().await;
+                                tracker.add_proof();
+                                let current_rate = tracker.get_proof_rate();
+                                info!(
+                                    "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Current rate: {:.4} proofs/sec. Submitting to nockpool.",
+                                    target_type,
+                                    ((submission.proof.len() as f64) / 1024.0 * 100.0).round() / 100.0,
+                                    current_rate
+                                );
+                            }
+                            
                             if let Err(e) = submission_tx.send(submission) {
                                 error!(%id, error = ?e, "failed to send submission");
                             }
