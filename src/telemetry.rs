@@ -6,7 +6,7 @@ use tokio::time::{interval, sleep};
 use tracing::{error, info, warn};
 use sha2::{Sha256, Digest};
 
-use crate::{device::get_device_info_with_proof_rate, hot_loader::HotLibrary};
+use crate::device::get_device_info_with_proof_rate;
 
 #[derive(Debug, Serialize)]
 struct TelemetryData {
@@ -14,7 +14,7 @@ struct TelemetryData {
     device_cpu: String,
     device_ram_capacity_gb: u64,
     device_proof_rate_per_sec: f64,
-    zkvm_jetpack_hash: Option<String>,
+    zkvm_jetpack_hash: Option<String>,  // Now contains binary hash (includes embedded zkvm_jetpack)
     miner_version: String,
 }
 
@@ -33,12 +33,12 @@ impl TelemetryClient {
         }
     }
 
-    /// Calculate SHA-256 hash of the zkvm_jetpack library
-    fn get_zkvm_jetpack_hash() -> Option<String> {
-        if let Some(lib_path) = HotLibrary::find_library() {
-            if let Ok(lib_bytes) = fs::read(&lib_path) {
+    /// Calculate SHA-256 hash of the current binary (contains embedded zkvm_jetpack)
+    fn get_binary_hash() -> Option<String> {
+        if let Ok(exe_path) = env::current_exe() {
+            if let Ok(binary_bytes) = fs::read(&exe_path) {
                 let mut hasher = Sha256::new();
-                hasher.update(&lib_bytes);
+                hasher.update(&binary_bytes);
                 let hash = hasher.finalize();
                 return Some(format!("{:x}", hash));
             }
@@ -54,7 +54,7 @@ impl TelemetryClient {
             device_cpu: device_info.cpu_model,
             device_ram_capacity_gb: device_info.ram_capacity_gb,
             device_proof_rate_per_sec: proof_rate,
-            zkvm_jetpack_hash: Self::get_zkvm_jetpack_hash(),
+            zkvm_jetpack_hash: Self::get_binary_hash(),
             miner_version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
