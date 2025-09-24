@@ -49,3 +49,7 @@ zkvm-jetpack = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd3
 nockvm_macros = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockvm_macros" }
 nockchain-libp2p-io = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "nockchain-libp2p-io" }
 kernels = { git = "https://github.com/swpsco/nockchain.git", rev = "7f64fd35bb1e70048a60b8fc397416c0f81921ad", package = "kernels" }
+
+[features]
+default = []
+gpu = []

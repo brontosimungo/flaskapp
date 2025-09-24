@@ -1,7 +1,6 @@
 use sysinfo::System;
 use quiver::device_info::DeviceInfo;
-use crate::{miner::get_current_proof_rate, hot_loader::HotLibrary};
-use std::fs;
+use crate::miner::get_current_proof_rate;
 
 pub fn get_device_info() -> DeviceInfo {
     let mut sys = System::new();
@@ -17,29 +16,6 @@ pub fn get_device_info() -> DeviceInfo {
         cpu_model: cpu_model.clone().trim().to_string(),
         ram_capacity_gb,
     }
-}
-
-/// Check if the zkvm_jetpack library is GPU-based by analyzing its contents
-pub fn is_jetpack_gpu_library() -> bool {
-    if let Some(lib_path) = HotLibrary::find_library() {
-        if let Ok(lib_bytes) = fs::read(&lib_path) {
-            let lib_content = String::from_utf8_lossy(&lib_bytes);
-
-            // Look for CUDA-related symbols that indicate GPU library
-            let cuda_indicators = [
-                "cudaLaunchKernel",
-                "cudaMalloc",
-                "cudaMemcpy",
-                "cudaFree",
-                "__cudaRegisterFunction",
-                "libcudart",
-                "libcuda"
-            ];
-
-            return cuda_indicators.iter().any(|&indicator| lib_content.contains(indicator));
-        }
-    }
-    false
 }
 
 pub fn get_device_info_with_proof_rate() -> (DeviceInfo, f64) {
