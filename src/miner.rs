@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::{config::Config, device::is_jetpack_gpu_library};
 use crate::hot_loader::HotLibrary;
 use crate::jam_loader::load_kernel_from_env;
 
@@ -50,9 +50,11 @@ impl ProofRateTracker {
         }
     }
 
-    pub fn add_proof(&mut self) {
+    pub fn add_proofs(&mut self, count: u32) {
         let now = Instant::now();
-        self.proof_timestamps.push_back(now);
+        for _ in 0..count {
+            self.proof_timestamps.push_back(now);
+        }
         self.clean_old_proofs(now);
     }
 
@@ -94,6 +96,7 @@ impl ProofRateTracker {
 // Global proof rate tracker for access across the application
 use std::sync::Arc;
 static GLOBAL_PROOF_RATE_TRACKER: std::sync::OnceLock<Arc<Mutex<ProofRateTracker>>> = std::sync::OnceLock::new();
+static IS_GPU_LIBRARY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 pub fn get_current_proof_rate() -> f64 {
     if let Some(tracker) = GLOBAL_PROOF_RATE_TRACKER.get() {
@@ -104,11 +107,48 @@ pub fn get_current_proof_rate() -> f64 {
     0.0
 }
 
+static PROOF_INCREMENT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+
+/// Get the proof increment based on library type and config
+fn get_proof_increment(config: &Config) -> u32 {
+    if config.no_gpu {
+        // Force CPU mode
+        1
+    } else if *IS_GPU_LIBRARY.get().unwrap_or(&false) {
+        // GPU library detected, use 100x multiplier
+        100
+    } else {
+        // CPU library, use normal counting
+        1
+    }
+}
+
+/// Get the stored proof increment value
+fn get_proof_increment_cached() -> u32 {
+    *PROOF_INCREMENT.get().unwrap_or(&1)
+}
+
 pub async fn start(
     config: Config,
     mut template_rx: watch::Receiver<Template>,
     submission_tx: watch::Sender<Submission>,
 ) -> Result<()> {
+    // Check if zkvm_jetpack library is GPU-based
+    let is_gpu_library = is_jetpack_gpu_library();
+    let _ = IS_GPU_LIBRARY.set(is_gpu_library);
+
+    // Calculate and store proof increment
+    let proof_increment = get_proof_increment(&config);
+    let _ = PROOF_INCREMENT.set(proof_increment);
+
+    // Log library type and proof rate
+    if config.no_gpu {
+        info!("GPU mining disabled by --no-gpu flag, using CPU mode (1x proof rate)");
+    } else if is_gpu_library {
+        info!("GPU-based zkvm_jetpack library detected, using GPU proof rate multiplier ({}x)", proof_increment);
+    } else {
+        info!("CPU-based zkvm_jetpack library detected, using CPU mode (1x proof rate)");
+    }
     let num_threads = {
         let sys = System::new_all();
         let logical_cores = sys.cpus().len() as u32;
@@ -235,7 +275,7 @@ pub async fn start(
                                 // Add miss to proof rate tracker so device_proof_rate includes all attempts
                                 {
                                     let mut tracker = proof_rate_tracker.lock().await;
-                                    tracker.add_proof();
+                                    tracker.add_proofs(get_proof_increment_cached());
                                 }
 
                                 let mut nonce_slab = NounSlab::new();
@@ -297,7 +337,7 @@ pub async fn start(
                             // Update proof rate tracker
                             {
                                 let mut tracker = proof_rate_tracker.lock().await;
-                                tracker.add_proof();
+                                tracker.add_proofs(get_proof_increment_cached());
                                 let current_rate = tracker.get_proof_rate();
                                 info!(
                                     "solution found on thread={id} for target={:?}. Proof size: {:?} KB. Current rate: {:.4} proofs/sec. Submitting to nockpool.",
