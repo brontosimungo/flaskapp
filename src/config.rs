@@ -46,6 +46,10 @@ pub struct Config {
     /// Base URL for the NockPool API (for local development).
     #[arg(long, env = "NOCKPOOL_API_URL", default_value = "https://nockpool.com")]
     pub api_url: String,
+
+    /// Disable GPU mining and force CPU-only mode.
+    #[arg(long, default_value_t = false)]
+    pub no_gpu: bool,
 }
 
 impl Config {
