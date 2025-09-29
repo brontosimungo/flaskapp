@@ -44,8 +44,63 @@ pub fn get_gpu_info() -> Option<String> {
     if gpu_models.is_empty() {
         None
     } else {
-        Some(gpu_models.join(", "))
+        // Clean up GPU names and remove duplicates
+        let cleaned_gpus: Vec<String> = gpu_models.into_iter()
+            .map(|gpu| clean_gpu_name(&gpu))
+            .filter(|gpu| !gpu.is_empty())
+            .collect::<std::collections::HashSet<_>>() // Remove duplicates
+            .into_iter()
+            .collect();
+
+        if cleaned_gpus.is_empty() {
+            None
+        } else {
+            Some(cleaned_gpus.join(", "))
+        }
     }
+}
+
+fn clean_gpu_name(gpu_name: &str) -> String {
+    let mut cleaned = gpu_name.to_string();
+
+    // Remove device IDs and revision info from lspci output
+    // Example: "NVIDIA Corporation Device [10de:2786] (rev a1)" -> "NVIDIA Corporation Device"
+    if let Some(pos) = cleaned.find(" [") {
+        cleaned = cleaned[..pos].to_string();
+    }
+
+    // Remove revision info
+    if let Some(pos) = cleaned.find(" (rev ") {
+        cleaned = cleaned[..pos].to_string();
+    }
+
+    // Clean up common patterns
+    cleaned = cleaned.replace("Advanced Micro Devices, Inc. [AMD/ATI] Device", "AMD GPU")
+        .replace("NVIDIA Corporation Device", "NVIDIA GPU")
+        .replace("Intel Corporation Device", "Intel GPU")
+        .replace("  ", " ")
+        .trim()
+        .to_string();
+
+    // If it's just a generic name, skip it unless we already have a proper name
+    if cleaned == "AMD GPU" || cleaned == "NVIDIA GPU" || cleaned == "Intel GPU" {
+        if gpu_name.contains("GeForce") || gpu_name.contains("Radeon") || gpu_name.contains("UHD") ||
+           gpu_name.contains("Iris") || gpu_name.contains("RTX") || gpu_name.contains("GTX") {
+            // Try to extract the actual model name
+            if let Some(model_start) = gpu_name.find("GeForce") {
+                if let Some(model_end) = gpu_name[model_start..].find(" [") {
+                    return format!("NVIDIA {}", &gpu_name[model_start..model_start + model_end]);
+                }
+            }
+            if let Some(model_start) = gpu_name.find("Radeon") {
+                if let Some(model_end) = gpu_name[model_start..].find(" [") {
+                    return format!("AMD {}", &gpu_name[model_start..model_start + model_end]);
+                }
+            }
+        }
+    }
+
+    cleaned
 }
 
 #[cfg(target_os = "linux")]
