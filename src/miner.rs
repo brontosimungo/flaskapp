@@ -143,13 +143,6 @@ pub async fn start(
     } else {
         info!("CPU build detected, using CPU mode (1x proof rate)");
     }
-
-    // Log detected GPU information
-    if let Some(gpu_info) = crate::device::get_gpu_info() {
-        info!("Detected GPU(s): {}", gpu_info);
-    } else {
-        info!("No GPU detected");
-    }
     let num_threads = {
         let sys = System::new_all();
         let logical_cores = sys.cpus().len() as u32;
