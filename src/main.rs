@@ -72,11 +72,15 @@ async fn main() {
 
     // --- Gather System Info ---
     let device_info = device::get_device_info();
+    let gpu_info = device::get_gpu_info();
+    let gpu_str = gpu_info.as_deref().unwrap_or("None detected");
+
     tracing::info!(
-        "Starting miner with OS='{}', CPU='{}', RAM='{} GB'",
+        "Starting miner with OS='{}', CPU='{}', RAM='{} GB', GPU='{}'",
         device_info.os,
         device_info.cpu_model,
-        device_info.ram_capacity_gb
+        device_info.ram_capacity_gb,
+        gpu_str
     );
 
     // --- Set up panic hook for quiver client ---

@@ -208,12 +208,14 @@ pub async fn start(
     {
         let proof_rate_tracker_clone = proof_rate_tracker.clone();
         tokio::spawn(async move {
+            let start_time = std::time::Instant::now();
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
                 let mut tracker = proof_rate_tracker_clone.lock().await;
                 let current_rate = tracker.get_proof_rate();
-                if current_rate > 0.0 {
+                // Only show proof rate after first 5 minutes
+                if current_rate > 0.0 && start_time.elapsed() >= std::time::Duration::from_secs(300) {
                     info!("Current mining rate: {:.4} proofs/sec", current_rate);
                 }
             }
