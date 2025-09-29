@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reqwest::Client;
 use serde::Serialize;
-use std::{time::Duration, fs, env};
+use std::{time::{Duration, Instant}, fs, env};
 use tokio::time::{interval, sleep};
 use tracing::{error, info, warn};
 use sha2::{Sha256, Digest};
@@ -23,6 +23,7 @@ pub struct TelemetryClient {
     client: Client,
     api_key: String,
     api_base_url: String,
+    start_time: Instant,
 }
 
 impl TelemetryClient {
@@ -31,6 +32,7 @@ impl TelemetryClient {
             client: Client::new(),
             api_key,
             api_base_url,
+            start_time: Instant::now(),
         }
     }
 
