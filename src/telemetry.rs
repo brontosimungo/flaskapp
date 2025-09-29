@@ -6,7 +6,7 @@ use tokio::time::{interval, sleep};
 use tracing::{error, info, warn};
 use sha2::{Sha256, Digest};
 
-use crate::device::get_device_info_with_proof_rate;
+use crate::device::{get_device_info_with_proof_rate, get_gpu_info};
 
 #[derive(Debug, Serialize)]
 struct TelemetryData {
@@ -16,6 +16,7 @@ struct TelemetryData {
     device_proof_rate_per_sec: f64,
     zkvm_jetpack_hash: Option<String>,  // Now contains binary hash (includes embedded zkvm_jetpack)
     miner_version: String,
+    gpu_info: Option<String>,
 }
 
 pub struct TelemetryClient {
@@ -56,6 +57,7 @@ impl TelemetryClient {
             device_proof_rate_per_sec: proof_rate,
             zkvm_jetpack_hash: Self::get_binary_hash(),
             miner_version: env!("CARGO_PKG_VERSION").to_string(),
+            gpu_info: get_gpu_info(),
         };
 
         let api_url = format!("{}/api/v1/telemetry", self.api_base_url);
