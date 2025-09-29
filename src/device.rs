@@ -45,12 +45,31 @@ pub fn get_gpu_info() -> Option<String> {
         None
     } else {
         // Clean up GPU names and remove duplicates
-        let cleaned_gpus: Vec<String> = gpu_models.into_iter()
+        let mut cleaned_gpus: Vec<String> = gpu_models.into_iter()
             .map(|gpu| clean_gpu_name(&gpu))
             .filter(|gpu| !gpu.is_empty())
             .collect::<std::collections::HashSet<_>>() // Remove duplicates
             .into_iter()
             .collect();
+
+        // Filter out generic names if we have specific ones
+        let has_specific_nvidia = cleaned_gpus.iter().any(|gpu| gpu.contains("GeForce") || gpu.contains("RTX") || gpu.contains("GTX"));
+        let has_specific_amd = cleaned_gpus.iter().any(|gpu| gpu.contains("Radeon") || gpu.contains("RX "));
+        let has_specific_intel = cleaned_gpus.iter().any(|gpu| gpu.contains("UHD") || gpu.contains("Iris") || gpu.contains("Arc"));
+
+        cleaned_gpus.retain(|gpu| {
+            if gpu == "NVIDIA GPU" && has_specific_nvidia {
+                false
+            } else if gpu == "AMD GPU" && has_specific_amd {
+                false
+            } else if gpu == "Intel GPU" && has_specific_intel {
+                false
+            } else if gpu.starts_with("Advanced Micro Devices") || gpu.starts_with("NVIDIA Corporation") || gpu.starts_with("Intel Corporation") {
+                false // Filter out verbose manufacturer names
+            } else {
+                true
+            }
+        });
 
         if cleaned_gpus.is_empty() {
             None
