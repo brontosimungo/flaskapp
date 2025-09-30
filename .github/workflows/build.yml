@@ -118,6 +118,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly
+          cache: false
           target: aarch64-apple-darwin
       
       - name: Build miner
