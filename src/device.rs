@@ -26,7 +26,7 @@ pub fn get_device_info_with_proof_rate() -> (DeviceInfo, f64) {
 }
 
 pub fn get_gpu_info() -> Option<String> {
-    let mut gpu_models = Vec::new();
+    let mut gpu_models: Vec<String> = Vec::new();
 
     // Only detect GPUs on Linux
     #[cfg(target_os = "linux")]
