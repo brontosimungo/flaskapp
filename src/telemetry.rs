@@ -92,6 +92,7 @@ impl TelemetryClient {
     }
 
     pub async fn start_telemetry_loop(&self) -> Result<()> {
+        sleep(Duration::from_secs(60)).await;
         let mut interval = interval(Duration::from_secs(300)); // Send telemetry every 5 minutes
         
         loop {
