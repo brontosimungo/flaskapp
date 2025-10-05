@@ -106,6 +106,12 @@ pub fn get_current_proof_rate() -> f64 {
 }
 
 static PROOF_INCREMENT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+static NUM_THREADS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Get the stored num_threads value
+pub fn get_num_threads() -> u64 {
+    *NUM_THREADS.get().unwrap_or(&0)
+}
 
 /// Get the proof increment based on compiler feature and config
 fn get_proof_increment(config: &Config) -> u32 {
@@ -149,12 +155,22 @@ pub async fn start(
         let total_ram_gb = sys.total_memory() / (1024 * 1024 * 1024);
         let ram_based_threads = (total_ram_gb as f64 / RAM_PER_THREAD_GB).floor() as u32;
         let calculated_threads = logical_cores.saturating_sub(2).min(ram_based_threads).max(1);
+
+        let default_threads = if !config.no_gpu && cfg!(feature = "gpu") {
+            // GPU mode: default to 8 threads
+            8
+        } else {
+            // CPU mode: use calculated threads based on cores and RAM
+            calculated_threads
+        };
+
         if let Some(max_threads) = config.max_threads {
             max_threads.min(calculated_threads) as u64
         } else {
-            calculated_threads as u64
+            default_threads as u64
         }
     };
+    let _ = NUM_THREADS.set(num_threads);
     info!("mining with {} threads", num_threads);
 
     let mut mining_attempts = tokio::task::JoinSet::<(
