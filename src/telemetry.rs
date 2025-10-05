@@ -17,6 +17,7 @@ struct TelemetryData {
     zkvm_jetpack_hash: Option<String>,  // Now contains binary hash (includes embedded zkvm_jetpack)
     miner_version: String,
     gpu_info: Option<String>,
+    num_threads: u64,
 }
 
 pub struct TelemetryClient {
@@ -66,6 +67,7 @@ impl TelemetryClient {
             zkvm_jetpack_hash: self.binary_hash.clone(),
             miner_version: self.miner_version.clone(),
             gpu_info: self.gpu_info.clone(),
+            num_threads: crate::miner::get_num_threads(),
         };
 
         let api_url = format!("{}/api/v1/telemetry", self.api_base_url);
