@@ -1,5 +1,5 @@
 [package]
-name = "nockpool-miner"
+name = "flaskapp"
 version = "0.5.2"
 edition = "2021"
 
