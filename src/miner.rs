@@ -266,7 +266,7 @@ pub async fn start(
                             };
 
                             if effect.head().eq_bytes("miss") {
-                                info!("solution did not hit targets on thread={id}, trying again");
+                                // info!("solution did not hit targets on thread={id}, trying again");
 
                                 // Add miss to proof rate tracker so device_proof_rate includes all attempts
                                 {
@@ -510,7 +510,7 @@ async fn mine(
 
     let wire = WireRepr::new("miner", 1, vec![WireTag::String("candidate".to_string())]);
     mining_attempts.spawn(async move {
-        info!("starting scanning image attempt on thread={id}");
+        // info!("starting scanning image attempt on thread={id}");
         let result = serf.poke(wire.clone(), slab.clone()).await.map_err(|e| anyhow::anyhow!(e));
         (serf, id, result)
     });
