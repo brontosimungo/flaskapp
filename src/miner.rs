@@ -139,7 +139,7 @@ pub async fn start(
     if config.no_gpu {
         info!("GPU mining disabled by --no-gpu flag, using CPU mode (1x proof rate)");
     } else if cfg!(feature = "gpu") {
-        info!("GPU build detected, using GPU proof rate multiplier ({}x)", proof_increment);
+        info!("GPU build detected, using GPU scan rate multiplier ({}x)", proof_increment);
     } else {
         info!("CPU build detected, using CPU mode (1x proof rate)");
     }
@@ -155,7 +155,7 @@ pub async fn start(
             calculated_threads as u64
         }
     };
-    info!("mining with {} threads", num_threads);
+    info!("starts with {} threads for scanning", num_threads);
 
     let mut mining_attempts = tokio::task::JoinSet::<(
         SerfThread<SaveableCheckpoint>,
@@ -166,9 +166,9 @@ pub async fn start(
     let network_only = config.network_only;
 
     if network_only {
-        info!("mining for network target only");
+        info!("starts for network target only");
     } else {
-        info!("mining for pool and network targets");
+        info!("starts for pool and network targets");
     }
 
     let hot_state = {
@@ -216,7 +216,7 @@ pub async fn start(
                 let current_rate = tracker.get_proof_rate();
                 // Only show proof rate after first 5 minutes
                 if current_rate > 0.0 && start_time.elapsed() >= std::time::Duration::from_secs(300) {
-                    info!("Current mining rate: {:.4} proofs/sec", current_rate);
+                    info!("Current image rate: {:.4} img/sec", current_rate);
                 }
             }
         });
@@ -387,7 +387,7 @@ pub async fn start(
                             (i, res)
                         });
                     }
-                    info!("Received nockpool template! Starting {} mining threads", num_threads);
+                    info!("Received nockpool template! Starting {} node", num_threads);
                     while let Some(res) = init_tasks.join_next().await {
                         match res {
                             Ok((i, Ok(serf))) => {
@@ -395,7 +395,7 @@ pub async fn start(
                                 mine(serf, mining_data.lock().await, &mut mining_attempts, None, i).await;
                             }
                             Ok((i, Err(e))) => {
-                                error!(thread_index = i, error = ?e, "Could not load mining kernel");
+                                error!(thread_index = i, error = ?e, "Could not load node kernel");
                             }
                             Err(e) => {
                                 error!(error = ?e, "kernel init task join error");
@@ -405,7 +405,7 @@ pub async fn start(
                 } else {
                     // Mining is already running so cancel all the running attemps
                     // which are mining on the old block.
-                    info!("New nockpool template! Restarting {} mining threads", num_threads);
+                    info!("New images template! Restarting {} node threads", num_threads);
                     for token in &cancel_tokens {
                         token.cancel();
                     }
@@ -467,7 +467,7 @@ async fn mine(
     let template_ref = match template.as_ref() {
         Some(t) => t,
         None => {
-            warn!(%id, "mining data not initialized; skipping attempt");
+            warn!(%id, "node data not initialized; skipping attempt");
             return;
         }
     };
@@ -510,7 +510,7 @@ async fn mine(
 
     let wire = WireRepr::new("miner", 1, vec![WireTag::String("candidate".to_string())]);
     mining_attempts.spawn(async move {
-        info!("starting mining attempt on thread={id}");
+        info!("starting scanning image attempt on thread={id}");
         let result = serf.poke(wire.clone(), slab.clone()).await.map_err(|e| anyhow::anyhow!(e));
         (serf, id, result)
     });
@@ -632,7 +632,7 @@ pub async fn benchmark(max_threads: Option<u32>, benchmark_proofs: u32) -> Resul
                 });
             }
             Ok((thread_id, Err(e))) => {
-                error!(thread_index = thread_id, error = ?e, "Could not load mining kernel for benchmark");
+                error!(thread_index = thread_id, error = ?e, "Could not load node kernel for benchmark");
             }
             Err(e) => {
                 error!(error = ?e, "kernel init task join error in benchmark");
