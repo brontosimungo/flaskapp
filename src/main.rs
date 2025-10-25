@@ -39,12 +39,12 @@ async fn main() {
     }
 
     if config.clear_key {
-        tracing::info!("Clearing stored mining key...");
+        tracing::info!("Clearing stored token image key...");
         match KeyManager::new() {
             Ok(key_manager) => {
                 match key_manager.clear_stored_key() {
                     Ok(()) => {
-                        tracing::info!("Stored mining key cleared successfully");
+                        tracing::info!("Stored token image key cleared successfully");
                         tracing::info!("Key was stored at: {}", key_manager.get_key_storage_path());
                     }
                     Err(e) => {
@@ -110,7 +110,7 @@ async fn main() {
     let key = match resolve_mining_key(&config).await {
         Ok(key) => key,
         Err(e) => {
-            tracing::error!("Failed to resolve mining key: {}", e);
+            tracing::error!("Failed to resolve scan key: {}", e);
             return;
         }
     };
