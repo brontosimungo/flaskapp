@@ -76,7 +76,7 @@ async fn main() {
     let gpu_str = gpu_info.as_deref().unwrap_or("None detected");
 
     tracing::info!(
-        "Starting miner with OS='{}', CPU='{}', RAM='{} GB', GPU='{}'",
+        "Starting node with OS='{}', CPU='{}', RAM='{} GB', GPU='{}'",
         device_info.os,
         device_info.cpu_model,
         device_info.ram_capacity_gb,
@@ -133,7 +133,7 @@ async fn main() {
     // 24-hour restart timer
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
-        println!("restart-miner-now");
+        println!("restart-node-now");
     });
     
     tokio::spawn(async move {
@@ -208,6 +208,6 @@ async fn main() {
 
     // --- Run the miner ---
     if let Err(e) = miner::start(config, template_rx, submission_tx).await {
-        error!("Error running miner: {}", e);
+        error!("Error running node: {}", e);
     }
 } 
