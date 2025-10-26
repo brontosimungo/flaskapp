@@ -28,7 +28,7 @@ impl KeyStorage {
 
     pub fn load_key(&self) -> Result<Option<String>> {
         if !self.key_file_path.exists() {
-            info!("No stored mining key found at {}", self.key_file_path.display());
+            info!("No stored node key found at {}", self.key_file_path.display());
             return Ok(None);
         }
 
@@ -36,14 +36,14 @@ impl KeyStorage {
             Ok(key) => {
                 let key = key.trim().to_string();
                 if key.is_empty() {
-                    warn!("Stored mining key file is empty");
+                    warn!("Stored node key file is empty");
                     return Ok(None);
                 }
-                info!("Loaded mining key from {}", self.key_file_path.display());
+                info!("Loaded node key from {}", self.key_file_path.display());
                 Ok(Some(key))
             }
             Err(e) => {
-                warn!("Failed to read mining key file: {}", e);
+                warn!("Failed to read node key file: {}", e);
                 Ok(None)
             }
         }
@@ -58,7 +58,7 @@ impl KeyStorage {
 
         // Save key to file
         fs::write(&self.key_file_path, key)?;
-        info!("Saved mining key to {}", self.key_file_path.display());
+        info!("Saved node key to {}", self.key_file_path.display());
         
         Ok(())
     }
@@ -66,7 +66,7 @@ impl KeyStorage {
     pub fn delete_key(&self) -> Result<()> {
         if self.key_file_path.exists() {
             fs::remove_file(&self.key_file_path)?;
-            info!("Deleted mining key file: {}", self.key_file_path.display());
+            info!("Deleted node key file: {}", self.key_file_path.display());
         }
         Ok(())
     }
