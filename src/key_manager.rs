@@ -27,7 +27,7 @@ impl KeyManager {
 
         // Check if we have a stored key
         if let Some(stored_key) = self.storage.load_key()? {
-            info!("Using stored mining key");
+            info!("Using stored node key");
             return Ok(stored_key);
         }
 
