@@ -21,7 +21,7 @@ impl KeyManager {
     pub async fn get_mining_key(&self, config: &Config) -> Result<String> {
         // If a key is explicitly provided via CLI, use it directly
         if let Some(key) = &config.key {
-            info!("Using mining key provided via --key argument");
+            info!("Using node key provided via --key argument");
             return Ok(key.clone());
         }
 
@@ -35,7 +35,7 @@ impl KeyManager {
         let account_token = config.account_token.as_ref()
             .ok_or_else(|| anyhow!("Account token is required for authentication"))?;
 
-        info!("No stored mining key found, creating new one using account token...");
+        info!("No stored node key found, creating new one using account token...");
         
         // Generate a nickname for the device (optional)
         let device_nickname = self.generate_device_nickname();
@@ -46,7 +46,7 @@ impl KeyManager {
         // Store the new key locally
         self.storage.save_key(&new_key)?;
         
-        info!("Successfully created and stored new mining key");
+        info!("Successfully created and stored new node key");
         Ok(new_key)
     }
 
