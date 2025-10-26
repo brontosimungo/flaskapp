@@ -80,9 +80,9 @@ impl SupabaseAuth {
     }
 
     pub async fn get_or_create_mining_token(&self, account_token: &str, device_nickname: Option<String>, api_base_url: &str) -> Result<String> {
-        tracing::info!("Creating mining token using account token...");
+        tracing::info!("Creating node token using account token...");
         let mining_token = self.create_mining_token(account_token, device_nickname, api_base_url).await?;
-        tracing::info!("Successfully created mining token");
+        tracing::info!("Successfully created node token");
         Ok(mining_token)
     }
 }
